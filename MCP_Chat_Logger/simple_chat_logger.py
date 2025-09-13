@@ -7,6 +7,10 @@ from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 import openai
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Initialize FastMCP server
 mcp = FastMCP("chat_logger")
@@ -53,8 +57,20 @@ def format_message(message: Dict[str, Any]) -> str:
 
 def analyze_conversation_with_openai(messages: List[Dict[str, Any]]) -> Dict[str, str]:
     """Use OpenAI to analyze the entire conversation and extract code changes"""
-    # Set API key
-    openai.api_key = "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"
+    # Set API key from environment variable
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("❌ OPENAI_API_KEY not found in environment variables")
+        return {
+            "tag": "other",
+            "description": "OpenAI API key not configured",
+            "title": "Chat Conversation",
+            "summary": "OpenAI analysis not available - API key missing",
+            "before_code": None,
+            "after_code": None
+        }
+    
+    openai.api_key = api_key
     
     try:
         # Format conversation for analysis
@@ -100,13 +116,13 @@ Focus on:
 """
         
         response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model=os.getenv("OPENAI_MODEL", "gpt-3.5-turbo"),
             messages=[
                 {"role": "system", "content": "You are a technical assistant that analyzes programming conversations and extracts code changes. Always respond with valid JSON."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3,
-            max_tokens=1500
+            temperature=float(os.getenv("OPENAI_TEMPERATURE", "0.3")),
+            max_tokens=int(os.getenv("OPENAI_MAX_TOKENS", "1500"))
         )
         
         # Parse AI response
