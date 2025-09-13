@@ -1,4 +1,6 @@
-chat_logs/
+MCP_Chat_Logger/chat_logs/
+MCP_Chat_Logger/.venv
+front_end/.venv
 
 # Python
 __pycache__/

@@ -1,0 +1,20 @@
+{
+  "name": "project-summary-dashboard",
+  "version": "1.0.0",
+  "description": "A dashboard to display project summaries from chat logs",
+  "scripts": {
+    "start": "uv run app.py",
+    "install-deps": "uv pip install -r requirements.txt",
+    "venv": "uv venv"
+  },
+  "keywords": [
+    "dashboard",
+    "project",
+    "summary",
+    "ai",
+    "python",
+    "flask"
+  ],
+  "author": "AiScream",
+  "license": "MIT"
+}
