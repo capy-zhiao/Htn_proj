@@ -1,91 +1,73 @@
 # MCP Chat Logger
 
-[![smithery badge](https://smithery.ai/badge/@AlexiFeng/MCP_Chat_Logger)](https://smithery.ai/server/@AlexiFeng/MCP_Chat_Logger)
+MCP Chat Logger is a simple yet powerful tool for saving chat history as Markdown format files, making it convenient for later viewing and sharing.
 
-<div align="center">
-  <a href="README_zh.md">中文</a> | <a href="README_en.md">English</a>
-</div>
+## Features
 
----
-
-MCP Chat Logger是一个简单而强大的聊天记录保存工具，可以将聊天历史保存为Markdown格式文件，便于后续查看和分享。
-
-## 功能特点
-
-- 支持大模型调用工具将聊天历史保存为格式化的Markdown文件
-- 自动为每条消息添加时间戳
-- 自定义保存目录
-- 支持会话ID标识不同的对话
+- Supports large models calling tools to save chat history as formatted Markdown files
+- Automatically adds timestamps to each message
+- Customizable save directory
+- Supports session IDs to identify different conversations
   
-## 下一阶段
-添加Overview功能
+## Next Phase
+Add Overview functionality
 
-### 安装步骤
+### Installation Steps
 
-#### Installing via Smithery
-
-To install MCP Chat Logger for Claude Desktop automatically via [Smithery](https://smithery.ai/server/@AlexiFeng/MCP_Chat_Logger):
-
-```bash
-npx -y @smithery/cli install @AlexiFeng/MCP_Chat_Logger --client claude
-```
-
-1. 克隆这个代码库：
+1. Clone this repository:
 
 ```bash
 git clone https://github.com/yourusername/MCP_Chat_Logger.git
 cd MCP_Chat_Logger
 ```
 
-2. 安装依赖：
-提前安装uv
+2. Install dependencies:
+Install uv beforehand
 
 ```bash
 uv add "mcp[cli]"
 ```
 
-## 使用方法
+## Usage
 
-1. 在项目目录启动mcp服务
+1. Start the mcp service in the project directory
 ```bash
 uv run chat_logger.py
 ```
 
-2. 在cursor/cherry studio中添加mcp服务器配置
+2. Add mcp server configuration in cursor/cherry studio
 "chat_logger": {
       "name": "chat_logger",
       "isActive": false,
       "command": "uv",
       "args": [
         "--directory",
-        "项目路径（例如~/MCP_Chat_Logger/）",
+        "project path (e.g., ~/MCP_Chat_Logger/)",
         "run",
         "chat_logger.py"
       ]
     }
 
-## 项目结构
+## Project Structure
 
 ```
 MCP_Chat_Logger/
-├── chat_logger.py      # 核心功能实现
-├── chat_logs/          # 默认保存目录
-├── README.md           # 项目说明
-├── README_zh.md        # 中文说明
-├── README_en.md        # 英文说明
-└── .gitignore          # Git忽略文件
+├── chat_logger.py      # Core functionality implementation
+├── chat_logs/          # Default save directory
+├── README.md           # Project description
+└── .gitignore          # Git ignore file
 ```
 
-## 贡献指南
+## Contribution Guidelines
 
-欢迎提交问题和拉取请求！如果您想贡献代码，请遵循以下步骤：
+Issues and pull requests are welcome! If you want to contribute code, please follow these steps:
 
-1. Fork这个仓库
-2. 创建您的特性分支 (`git checkout -b feature/amazing-feature`)
-3. 提交您的更改 (`git commit -m 'Add some amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 开启一个Pull Request
+1. Fork this repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## 许可证
+## License
 
-该项目采用MIT许可证 - 详情请查看 LICENSE 文件。
+This project is licensed under the MIT License - see the LICENSE file for details. 
