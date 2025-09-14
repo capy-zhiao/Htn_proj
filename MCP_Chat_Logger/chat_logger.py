@@ -107,6 +107,18 @@ Example Response:
         return {"title": "Analysis Error", "summary": f"An exception occurred: {e}"}
 
 
+def to_chat_message_models(data) -> List[ChatMessage]:
+    msgs = []
+    for m in data.get("messages", []) or []:
+        msgs.append(ChatMessage(
+            content   = m.get("content", "") or "",
+            timestamp = m.get("timestamp", "") or "",
+            type      = m.get("type", "unknown") or "unknown",
+            tags      = m.get("tags") or [],
+            ai_model  = m.get("ai_model") or m.get("aiModel") or "N/A",
+        ))
+    return msgs
+
 # map per-message LLM type -> your higher-level tag vocabulary
 _TYPE_TO_TAG = {
     "code-change": "function modify",

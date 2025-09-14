@@ -34,17 +34,12 @@ def process_log_files(log_dir):
                 data = json.load(f)
 
             project_summary = {
-                'id': data.get('conversation_id'),
-                'projectName': data.get('project_name'),
-                'title': data.get('title'),
-                'summary': data.get('summary'),
-                'codeChanges': data.get('code_changes'),
-                'type': data.get('type'),
-                'tags': data.get('tags'),
-                'timestamp': data.get('timestamp'),
-                'messageCount': data.get('message_count'),
-                'participants': data.get('participants'),
-                'aiModel': data.get('ai_model')
+                "id": data.get("id") or data.get("conversation_id") or file,
+                "projectName": data.get("project_name") or "Unknown Project",
+                "title": data.get("title") or "(Untitled)",
+                "summary": data.get("summary") or "",
+                "messages": data.get("messages", []),
+                "messageCount": data.get("message_count") or len(data.get("messages", [])),
             }
             project_summaries.append(project_summary)
         except Exception as e:
