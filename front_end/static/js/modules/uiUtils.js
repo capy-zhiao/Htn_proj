@@ -123,6 +123,11 @@ class UIUtils {
      * Escape HTML to prevent XSS
      */
     static escapeHtml(text) {
+        if (text === null || text === undefined) {
+            return '';
+        }
+        
+        const str = String(text);
         const map = {
             '&': '&amp;',
             '<': '&lt;',
@@ -130,7 +135,75 @@ class UIUtils {
             '"': '&quot;',
             "'": '&#039;'
         };
-        return text.replace(/[&<>"']/g, (m) => map[m]);
+        return str.replace(/[&<>"']/g, (m) => map[m]);
+    }
+
+    /**
+     * Render markdown formatting (bold) while preventing XSS
+     * Converts **text** to <strong>text</strong> safely
+     */
+    static renderMarkdown(text) {
+        if (text === null || text === undefined) {
+            return '';
+        }
+        
+        // First escape HTML to prevent XSS
+        let safe = this.escapeHtml(text);
+        
+        // Then convert **text** to <strong>text</strong>
+        // Use a more precise regex to match **text** patterns
+        safe = safe.replace(/\*\*([^*]+?)\*\*/g, '<strong class="font-semibold">$1</strong>');
+        
+        // Convert `code` to inline code blocks
+        safe = safe.replace(/`([^`]+?)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">$1</code>');
+        
+        return safe;
+    }
+
+    /**
+     * Format conversation summary with proper paragraph breaks
+     * Converts long text into readable paragraphs
+     */
+    static formatSummaryParagraphs(text) {
+        if (text === null || text === undefined) {
+            return '';
+        }
+        
+        // First apply markdown rendering
+        let formatted = this.renderMarkdown(text);
+        
+        // Split into sentences for better paragraph detection
+        const sentences = formatted.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+        
+        if (sentences.length <= 2) {
+            // Short summary, keep as single paragraph
+            return `<p class="text-gray-700 leading-relaxed mb-4">${formatted}</p>`;
+        }
+        
+        // For longer summaries, create logical paragraph breaks
+        const paragraphs = [];
+        let currentParagraph = [];
+        
+        for (let i = 0; i < sentences.length; i++) {
+            const sentence = sentences[i].trim();
+            currentParagraph.push(sentence);
+            
+            // Create paragraph break after 2-3 sentences or at logical breaks
+            const shouldBreak = 
+                currentParagraph.length >= 3 || // Max 3 sentences per paragraph
+                (currentParagraph.length >= 2 && i < sentences.length - 1) || // 2 sentences if not last
+                sentence.includes('**Modified**') || sentence.includes('**Added**') || 
+                sentence.includes('**Fixed**') || sentence.includes('**Updated**') ||
+                sentence.includes('**Created**') || sentence.includes('**Enhanced**');
+            
+            if (shouldBreak || i === sentences.length - 1) {
+                const paragraphText = currentParagraph.join(' ');
+                paragraphs.push(`<p class="text-gray-700 leading-relaxed mb-4">${paragraphText}</p>`);
+                currentParagraph = [];
+            }
+        }
+        
+        return paragraphs.join('');
     }
 
     /**

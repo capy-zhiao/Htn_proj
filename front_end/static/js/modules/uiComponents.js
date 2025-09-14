@@ -79,7 +79,7 @@ class UIComponents {
                         ${UIUtils.escapeHtml(project.title)}
                     </h3>
                     <p class="text-xs text-gray-600 mt-1 ${CONFIG.CSS_CLASSES.LINE_CLAMP_1}">
-                        ${UIUtils.escapeHtml(project.summary)}
+                        ${UIUtils.renderMarkdown(project.summary)}
                     </p>
                 </div>
                 
@@ -92,16 +92,22 @@ class UIComponents {
                         ${UIUtils.getTypeIcon(project.type)}
                         ${UIUtils.escapeHtml(project.type)}
                     </span>
+                    ${(project.before_code && project.after_code) ? `
+                        <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded flex items-center gap-1" title="Contains before/after code changes">
+                            <i data-lucide="git-compare" class="w-3 h-3"></i>
+                            Diff
+                        </span>
+                    ` : ''}
                 </div>
                 
                 <div class="flex items-center justify-between text-xs text-gray-500">
                     <div class="flex items-center gap-1">
                         <i data-lucide="calendar" class="w-3 h-3"></i>
-                        ${UIUtils.formatTimestamp(project.timestamp)}
+                        ${project.timestamp ? UIUtils.formatTimestamp(project.timestamp) : 'Unknown'}
                     </div>
                     <div class="flex items-center gap-1">
                         <i data-lucide="message-square" class="w-3 h-3"></i>
-                        ${UIUtils.escapeHtml(project.aiModel)}
+                        ${UIUtils.escapeHtml(project.aiModel || 'AI')}
                     </div>
                 </div>
             `;
@@ -140,129 +146,158 @@ class UIComponents {
         }
 
         detailView.innerHTML = `
-            <div class="mb-6">
+            <!-- Header Section -->
+            <div class="border-b border-gray-200 pb-6 mb-6">
                 <div class="flex items-start justify-between mb-4">
-                    <div>
-                        <h1 class="text-2xl font-bold text-gray-900 mb-2">
+                    <div class="flex-1">
+                        <h1 class="text-2xl font-bold text-gray-900 mb-3 leading-tight">
                             ${UIUtils.escapeHtml(selectedProject.title)}
                         </h1>
-                        <div class="flex items-center gap-2 mb-3">
-                            <span class="bg-gray-100 px-3 py-1 rounded-lg flex items-center gap-2">
+                        <div class="flex items-center gap-3 mb-4">
+                            <span class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium">
                                 <i data-lucide="folder-open" class="w-4 h-4"></i>
                                 ${UIUtils.escapeHtml(selectedProject.projectName)}
                             </span>
-                            <span class="px-3 py-1 rounded-lg flex items-center gap-2 ${UIUtils.getTypeColor(selectedProject.type)}">
+                            <span class="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium ${UIUtils.getTypeColor(selectedProject.type)}">
                                 ${UIUtils.getTypeIcon(selectedProject.type)}
                                 ${UIUtils.escapeHtml(selectedProject.type)}
                             </span>
+                            ${(selectedProject.before_code && selectedProject.after_code) ? `
+                                <span class="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-100 text-blue-800 rounded-lg text-sm font-medium">
+                                    <i data-lucide="git-compare" class="w-4 h-4"></i>
+                                    Code Changes
+                                </span>
+                            ` : ''}
                         </div>
                     </div>
-                    <div class="flex gap-2">
-                        <button class="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100">
-                            <i data-lucide="external-link" class="w-4 h-4"></i>
-                        </button>
+                    <div class="flex items-center gap-2 text-sm text-gray-500">
+                        <i data-lucide="calendar" class="w-4 h-4"></i>
+                        ${selectedProject.timestamp ? UIUtils.formatTimestamp(selectedProject.timestamp) : 'Unknown'}
                     </div>
                 </div>
                 
-                <div class="flex items-center gap-4 text-sm text-gray-600 mb-4">
-                    <div class="flex items-center gap-1">
-                        <i data-lucide="calendar" class="w-4 h-4"></i>
-                        ${UIUtils.formatTimestamp(selectedProject.timestamp)}
+                <!-- Tags -->
+                ${(selectedProject.tags || []).length > 0 ? `
+                    <div class="flex flex-wrap gap-2">
+                        ${selectedProject.tags.map(tag => `
+                            <span class="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-600 text-xs rounded-full">
+                                <i data-lucide="tag" class="w-3 h-3"></i>
+                                ${UIUtils.escapeHtml(tag)}
+                            </span>
+                        `).join('')}
                     </div>
-                    <div class="flex items-center gap-1">
-                        <i data-lucide="message-square" class="w-4 h-4"></i>
-                        Generated by ${UIUtils.escapeHtml(selectedProject.aiModel)}
-                    </div>
-                </div>
-
-                <div class="flex flex-wrap gap-2 mb-4">
-                    ${selectedProject.tags.map(tag => `
-                        <span class="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded-full">
-                            <i data-lucide="tag" class="w-3 h-3"></i>
-                            ${UIUtils.escapeHtml(tag)}
-                        </span>
-                    `).join('')}
-                </div>
+                ` : ''}
             </div>
 
-            <div class="space-y-6">
-                <div>
-                    <h3 class="text-lg font-semibold text-gray-900 mb-3">Summary</h3>
-                    <div class="bg-blue-50 border-l-4 border-blue-400 p-4 rounded-r-lg">
-                        <p class="text-gray-800">${UIUtils.escapeHtml(selectedProject.summary)}</p>
+            <!-- Main Content -->
+            <div class="space-y-8">
+                <!-- Summary Section -->
+                <div class="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="p-2 bg-blue-100 rounded-lg">
+                            <i data-lucide="file-text" class="w-5 h-5 text-blue-600"></i>
+                        </div>
+                        <h2 class="text-xl font-semibold text-gray-900">Conversation Summary</h2>
+                    </div>
+                    <div class="prose prose-sm max-w-none">
+                        ${UIUtils.formatSummaryParagraphs(selectedProject.summary)}
                     </div>
                 </div>
 
-                <div class="grid md:grid-cols-2 gap-6">
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                            <i data-lucide="wrench" class="w-5 h-5 text-green-600"></i>
-                            New Features and Capabilities
-                        </h3>
-                        <div class="bg-green-50 border border-green-200 rounded-lg p-4">
-                            <ul class="space-y-2">
-                                ${selectedProject.functions.length > 0 ? 
-                                    selectedProject.functions.map(func => `
-                                        <li class="flex items-start gap-2 text-sm">
-                                            <div class="w-1.5 h-1.5 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
-                                            <span class="text-gray-700">${UIUtils.escapeHtml(func)}</span>
-                                        </li>
-                                    `).join('') :
-                                    '<li class="text-sm text-gray-500 italic">No specific features identified</li>'
-                                }
-                            </ul>
+                ${this.renderCodeChangesSection(selectedProject)}
+
+                <!-- Features and Fixes Grid -->
+                <div class="grid lg:grid-cols-2 gap-6">
+                    <!-- Features Section -->
+                    <div class="bg-gradient-to-br from-green-50 to-emerald-50 border border-green-200 rounded-xl p-6">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2 bg-green-100 rounded-lg">
+                                <i data-lucide="plus-circle" class="w-5 h-5 text-green-600"></i>
+                            </div>
+                            <h3 class="text-lg font-semibold text-gray-900">New Features</h3>
                         </div>
+                        ${(selectedProject.functions || []).length > 0 ? `
+                            <div class="space-y-3">
+                                ${selectedProject.functions.map(func => `
+                                    <div class="flex items-start gap-3 p-3 bg-white/60 rounded-lg border border-green-100">
+                                        <div class="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
+                                        <p class="text-sm text-gray-700 leading-relaxed">${UIUtils.escapeHtml(func)}</p>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : `
+                            <div class="text-center py-8">
+                                <i data-lucide="search" class="w-8 h-8 text-green-300 mx-auto mb-3"></i>
+                                <p class="text-sm text-green-600 font-medium">No specific features identified</p>
+                                <p class="text-xs text-green-500 mt-1">This conversation may focus on other aspects</p>
+                            </div>
+                        `}
                     </div>
 
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                            <i data-lucide="bug" class="w-5 h-5 text-red-600"></i>
-                            Bug Fixes
-                        </h3>
-                        <div class="bg-red-50 border border-red-200 rounded-lg p-4">
-                            <ul class="space-y-2">
-                                ${selectedProject.bugFixes.length > 0 ? 
-                                    selectedProject.bugFixes.map(fix => `
-                                        <li class="flex items-start gap-2 text-sm">
-                                            <div class="w-1.5 h-1.5 bg-red-500 rounded-full mt-2 flex-shrink-0"></div>
-                                            <span class="text-gray-700">${UIUtils.escapeHtml(fix)}</span>
-                                        </li>
-                                    `).join('') :
-                                    '<li class="text-sm text-gray-500 italic">No specific bug fixes identified</li>'
-                                }
-                            </ul>
+                    <!-- Bug Fixes Section -->
+                    <div class="bg-gradient-to-br from-red-50 to-rose-50 border border-red-200 rounded-xl p-6">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2 bg-red-100 rounded-lg">
+                                <i data-lucide="bug" class="w-5 h-5 text-red-600"></i>
+                            </div>
+                            <h3 class="text-lg font-semibold text-gray-900">Bug Fixes</h3>
                         </div>
+                        ${(selectedProject.bugFixes || []).length > 0 ? `
+                            <div class="space-y-3">
+                                ${selectedProject.bugFixes.map(fix => `
+                                    <div class="flex items-start gap-3 p-3 bg-white/60 rounded-lg border border-red-100">
+                                        <div class="w-2 h-2 bg-red-500 rounded-full mt-2 flex-shrink-0"></div>
+                                        <p class="text-sm text-gray-700 leading-relaxed">${UIUtils.escapeHtml(fix)}</p>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : `
+                            <div class="text-center py-8">
+                                <i data-lucide="check-circle" class="w-8 h-8 text-red-300 mx-auto mb-3"></i>
+                                <p class="text-sm text-red-600 font-medium">No specific bug fixes identified</p>
+                                <p class="text-xs text-red-500 mt-1">This conversation may focus on other aspects</p>
+                            </div>
+                        `}
                     </div>
                 </div>
 
-                <div>
-                    <h3 class="text-lg font-semibold text-gray-900 mb-3">Impact and Results</h3>
-                    <div class="bg-purple-50 border-l-4 border-purple-400 p-4 rounded-r-lg">
-                        <p class="text-gray-800">${UIUtils.escapeHtml(selectedProject.impact)}</p>
+                <!-- Impact Section -->
+                <div class="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="p-2 bg-purple-100 rounded-lg">
+                            <i data-lucide="trending-up" class="w-5 h-5 text-purple-600"></i>
+                        </div>
+                        <h3 class="text-lg font-semibold text-gray-900">Impact & Results</h3>
                     </div>
+                    <p class="text-gray-700 leading-relaxed">${UIUtils.escapeHtml(selectedProject.impact)}</p>
                 </div>
 
-                <div>
-                    <div class="flex items-center gap-2 mb-3">
-                        <i data-lucide="code" class="w-5 h-5 text-gray-700"></i>
-                        <h3 class="text-lg font-semibold text-gray-900">Key Code Changes</h3>
-                    </div>
-                    <div class="bg-gray-900 rounded-lg overflow-hidden">
-                        <div class="bg-gray-800 px-4 py-2 text-sm text-gray-300 border-b border-gray-700">
-                            Code Changes
+                <!-- Conversation Stats -->
+                <div class="bg-gray-50 border border-gray-200 rounded-xl p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="p-2 bg-gray-100 rounded-lg">
+                            <i data-lucide="bar-chart-3" class="w-5 h-5 text-gray-600"></i>
                         </div>
-                        <pre class="p-4 text-sm text-gray-100 overflow-x-auto"><code>${UIUtils.escapeHtml(selectedProject.codeChanges)}</code></pre>
+                        <h3 class="text-lg font-semibold text-gray-900">Conversation Details</h3>
                     </div>
-                </div>
-
-                <div class="bg-gray-50 p-4 rounded-lg">
-                    <h3 class="text-lg font-semibold text-gray-900 mb-3">Conversation Details</h3>
-                    <div class="grid grid-cols-2 gap-4 text-sm">
-                        <div>
-                            <span class="font-medium text-gray-700">Message Count:</span> ${selectedProject.messageCount}
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div class="text-center p-4 bg-white rounded-lg border border-gray-100">
+                            <div class="text-2xl font-bold text-gray-900">${selectedProject.messageCount || 0}</div>
+                            <div class="text-sm text-gray-500 mt-1">Messages</div>
                         </div>
-                        <div>
-                            <span class="font-medium text-gray-700">Participants:</span> ${UIUtils.escapeHtml(selectedProject.participants.join(', '))}
+                        <div class="text-center p-4 bg-white rounded-lg border border-gray-100">
+                            <div class="text-2xl font-bold text-gray-900">${(selectedProject.participants || []).length}</div>
+                            <div class="text-sm text-gray-500 mt-1">Participants</div>
+                        </div>
+                        <div class="text-center p-4 bg-white rounded-lg border border-gray-100">
+                            <div class="text-2xl font-bold text-gray-900">${(selectedProject.tags || []).length}</div>
+                            <div class="text-sm text-gray-500 mt-1">Tags</div>
+                        </div>
+                        <div class="text-center p-4 bg-white rounded-lg border border-gray-100">
+                            <div class="text-2xl font-bold text-blue-600">
+                                <i data-lucide="message-square" class="w-6 h-6 mx-auto"></i>
+                            </div>
+                            <div class="text-sm text-gray-500 mt-1">${UIUtils.escapeHtml(selectedProject.aiModel || 'AI')}</div>
                         </div>
                     </div>
                 </div>
@@ -300,6 +335,328 @@ class UIComponents {
     }
 
     /**
+     * Render the code changes section with message-by-message display
+     * Only shows messages that contain code changes
+     */
+    renderCodeChangesSection(project) {
+        // Ensure project is defined and has the expected properties
+        if (!project || !project.messages) {
+            return '';
+        }
+        
+        // Filter messages to show ONLY those with code changes
+        const allMessages = project.messages || [];
+        const codeMessages = allMessages.filter(msg => this.hasCodeContent(msg));
+        
+        if (codeMessages.length === 0) {
+            return `
+                <div class="bg-white border border-gray-200 rounded-xl p-6">
+                    <div class="flex items-center gap-3 mb-4">
+                        <div class="p-2 bg-gray-100 rounded-lg">
+                            <i data-lucide="code" class="w-5 h-5 text-gray-500"></i>
+                        </div>
+                        <h3 class="text-lg font-semibold text-gray-900">Code Changes</h3>
+                    </div>
+                    <div class="text-center py-8">
+                        <i data-lucide="file-code" class="w-12 h-12 text-gray-300 mx-auto mb-4"></i>
+                        <p class="text-gray-500 font-medium">No code changes found</p>
+                        <p class="text-sm text-gray-400 mt-1">This conversation doesn't contain any code modifications</p>
+                    </div>
+                </div>
+            `;
+        }
+
+        const timelineId = `timeline-${Date.now()}`;
+        
+        return `
+            <div class="bg-white border border-gray-200 rounded-xl p-6">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 bg-blue-100 rounded-lg">
+                            <i data-lucide="code" class="w-5 h-5 text-blue-600"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900">Code Changes Timeline</h3>
+                            <p class="text-sm text-gray-500">${codeMessages.length} message${codeMessages.length > 1 ? 's' : ''} with code changes (filtered from ${allMessages.length} total)</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Expand/Collapse Button -->
+                    <button 
+                        onclick="window.toggleTimeline('${timelineId}')" 
+                        class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors duration-200"
+                        id="toggle-${timelineId}"
+                    >
+                        <span class="toggle-text">Show Details</span>
+                        <i data-lucide="chevron-down" class="w-4 h-4 toggle-icon transition-transform duration-200"></i>
+                    </button>
+                </div>
+                
+                <!-- Collapsible Timeline Content -->
+                <div id="${timelineId}" class="timeline-content hidden">
+                    <div class="space-y-4">
+                        ${codeMessages.map((msg, index) => this.renderSingleMessage(msg, index, true)).join('')}
+                    </div>
+                </div>
+                
+                <!-- Collapsed Summary -->
+                <div id="${timelineId}-summary" class="timeline-summary">
+                    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i data-lucide="info" class="w-4 h-4 text-blue-600"></i>
+                            <span class="text-sm font-medium text-blue-800">Timeline Summary</span>
+                        </div>
+                        <p class="text-sm text-blue-700">
+                            ${codeMessages.length} code change${codeMessages.length > 1 ? 's' : ''} recorded in this conversation. 
+                            Click "Show Details" above to view the complete timeline with code diffs.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Check if a message has any code content
+     */
+    hasCodeContent(message) {
+        // Check for direct code fields
+        if (message.before_code || message.after_code || message.code_changes) {
+            return true;
+        }
+        
+        // Check for code blocks in message content
+        if (message.content && message.content.includes('```')) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    /**
+     * Render a single message in the timeline
+     */
+    renderSingleMessage(message, index, isCodeFiltered = false) {
+        const messageTime = message.timestamp ? UIUtils.formatTimestamp(message.timestamp) : `Message ${index + 1}`;
+        const messageType = message.type || 'message';
+        
+        // Extract any code from the message
+        let codeBlocks = [];
+        
+        // Check for direct code fields
+        if (message.before_code || message.after_code) {
+            if (message.before_code && message.after_code) {
+                codeBlocks.push({
+                    type: 'before-after',
+                    before: message.before_code,
+                    after: message.after_code
+                });
+            } else if (message.before_code) {
+                codeBlocks.push({
+                    type: 'before',
+                    code: message.before_code
+                });
+            } else if (message.after_code) {
+                codeBlocks.push({
+                    type: 'after',
+                    code: message.after_code
+                });
+            }
+        } else if (message.code_changes) {
+            codeBlocks.push({
+                type: 'code',
+                code: message.code_changes
+            });
+        }
+        
+        // Also check for code in message content
+        if (message.content && message.content.includes('```')) {
+            const contentCodeBlocks = message.content.match(/```[\s\S]*?```/g);
+            if (contentCodeBlocks) {
+                contentCodeBlocks.forEach(block => {
+                    const cleanCode = block.replace(/```\w*\n?/, '').replace(/```$/, '').trim();
+                    if (cleanCode) {
+                        codeBlocks.push({
+                            type: 'content',
+                            code: cleanCode
+                        });
+                    }
+                });
+            }
+        }
+        
+        // Get message type icon and color
+        const typeInfo = this.getMessageTypeInfo(messageType);
+        
+        return `
+            <div class="border border-gray-200 rounded-lg bg-white shadow-sm">
+                <!-- Message Header -->
+                <div class="px-4 py-3 border-b border-gray-100 ${isCodeFiltered ? 'bg-blue-50' : 'bg-gray-50'}">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full ${isCodeFiltered ? 'bg-blue-100' : typeInfo.bgColor} flex items-center justify-center">
+                                <i data-lucide="${isCodeFiltered ? 'code' : typeInfo.icon}" class="w-4 h-4 ${isCodeFiltered ? 'text-blue-600' : typeInfo.textColor}"></i>
+                            </div>
+                            <div>
+                                <span class="font-medium text-gray-900">${isCodeFiltered ? 'Code Change' : 'Message'} ${index + 1}</span>
+                                ${!isCodeFiltered ? `
+                                    <span class="ml-2 px-2 py-1 ${typeInfo.bgColor} ${typeInfo.textColor} text-xs rounded-full font-medium">
+                                        ${messageType}
+                                    </span>
+                                ` : ''}
+                            </div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-sm font-medium ${isCodeFiltered ? 'text-blue-600' : 'text-gray-900'}">${messageTime}</div>
+                            ${isCodeFiltered ? '<div class="text-xs text-blue-500">Code Modified</div>' : ''}
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Message Content -->
+                <div class="p-4">
+                    ${!isCodeFiltered && message.content ? `
+                        <div class="mb-4">
+                            <h4 class="text-sm font-medium text-gray-700 mb-2">Message Content:</h4>
+                            <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 text-sm text-gray-700 max-h-32 overflow-y-auto">
+                                ${UIUtils.escapeHtml(message.content.substring(0, 300))}${message.content.length > 300 ? '...' : ''}
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    <!-- Code Blocks -->
+                    ${codeBlocks.length > 0 ? `
+                        <div class="space-y-4">
+                            <h4 class="text-sm font-medium text-gray-700 flex items-center gap-2">
+                                <i data-lucide="code" class="w-4 h-4"></i>
+                                ${isCodeFiltered ? 'Code Changes:' : 'Code in this message:'}
+                            </h4>
+                            ${codeBlocks.map((codeBlock, codeIndex) => this.renderCodeBlock(codeBlock, codeIndex)).join('')}
+                        </div>
+                    ` : `
+                        <div class="text-center py-4 text-gray-500 text-sm">
+                            <i data-lucide="message-square" class="w-8 h-8 mx-auto mb-2 text-gray-300"></i>
+                            No code found in this message
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Get message type styling information
+     */
+    getMessageTypeInfo(type) {
+        const typeMap = {
+            'code-change': {
+                icon: 'code',
+                bgColor: 'bg-blue-100',
+                textColor: 'text-blue-800'
+            },
+            'question': {
+                icon: 'help-circle',
+                bgColor: 'bg-purple-100',
+                textColor: 'text-purple-800'
+            },
+            'discussion': {
+                icon: 'message-circle',
+                bgColor: 'bg-green-100',
+                textColor: 'text-green-800'
+            },
+            'clarification': {
+                icon: 'info',
+                bgColor: 'bg-yellow-100',
+                textColor: 'text-yellow-800'
+            },
+            'unknown': {
+                icon: 'message-square',
+                bgColor: 'bg-gray-100',
+                textColor: 'text-gray-800'
+            }
+        };
+        
+        return typeMap[type] || typeMap['unknown'];
+    }
+
+    /**
+     * Render a single code block
+     */
+    renderCodeBlock(codeBlock, index) {
+        if (codeBlock.type === 'before-after') {
+            return `
+                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                    <div class="bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 border-b border-gray-200">
+                        Before & After Comparison
+                    </div>
+                    <div class="grid md:grid-cols-2 gap-0">
+                        <!-- Before -->
+                        <div class="border-r border-gray-200">
+                            <div class="bg-red-50 px-3 py-2 text-sm font-medium text-red-700 border-b border-red-200 flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <i data-lucide="minus-circle" class="w-3 h-3"></i>
+                                    Before
+                                </span>
+                                <button 
+                                    class="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
+                                    onclick="UIUtils.copyToClipboard(\`${codeBlock.before.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)"
+                                >
+                                    Copy
+                                </button>
+                            </div>
+                            <pre class="p-3 text-sm text-gray-800 font-mono leading-relaxed overflow-x-auto max-h-48 overflow-y-auto bg-white"><code>${UIUtils.escapeHtml(codeBlock.before)}</code></pre>
+                        </div>
+                        
+                        <!-- After -->
+                        <div>
+                            <div class="bg-green-50 px-3 py-2 text-sm font-medium text-green-700 border-b border-green-200 flex items-center justify-between">
+                                <span class="flex items-center gap-1">
+                                    <i data-lucide="plus-circle" class="w-3 h-3"></i>
+                                    After
+                                </span>
+                                <button 
+                                    class="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
+                                    onclick="UIUtils.copyToClipboard(\`${codeBlock.after.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)"
+                                >
+                                    Copy
+                                </button>
+                            </div>
+                            <pre class="p-3 text-sm text-gray-800 font-mono leading-relaxed overflow-x-auto max-h-48 overflow-y-auto bg-white"><code>${UIUtils.escapeHtml(codeBlock.after)}</code></pre>
+                        </div>
+                    </div>
+                </div>
+            `;
+        } else {
+            const typeInfo = {
+                'before': { label: 'Before Code', color: 'red', icon: 'minus-circle' },
+                'after': { label: 'After Code', color: 'green', icon: 'plus-circle' },
+                'code': { label: 'Code Changes', color: 'blue', icon: 'code' },
+                'content': { label: 'Code Block', color: 'gray', icon: 'file-code' }
+            };
+            
+            const info = typeInfo[codeBlock.type] || typeInfo['content'];
+            
+            return `
+                <div class="border border-gray-200 rounded-lg overflow-hidden">
+                    <div class="bg-${info.color === 'gray' ? 'gray' : info.color}-50 px-3 py-2 text-sm font-medium text-${info.color === 'gray' ? 'gray' : info.color}-700 border-b border-${info.color === 'gray' ? 'gray' : info.color}-200 flex items-center justify-between">
+                        <span class="flex items-center gap-1">
+                            <i data-lucide="${info.icon}" class="w-3 h-3"></i>
+                            ${info.label}
+                        </span>
+                        <button 
+                            class="text-xs px-2 py-1 bg-${info.color === 'gray' ? 'gray' : info.color}-100 text-${info.color === 'gray' ? 'gray' : info.color}-700 rounded hover:bg-${info.color === 'gray' ? 'gray' : info.color}-200"
+                            onclick="UIUtils.copyToClipboard(\`${codeBlock.code.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)"
+                        >
+                            Copy
+                        </button>
+                    </div>
+                    <pre class="p-3 text-sm text-gray-800 font-mono leading-relaxed overflow-x-auto max-h-64 overflow-y-auto bg-white"><code>${UIUtils.escapeHtml(codeBlock.code)}</code></pre>
+                </div>
+            `;
+        }
+    }
+
+    /**
      * Handle filter changes
      */
     handleFilterChange() {
@@ -312,9 +669,42 @@ class UIComponents {
     }
 }
 
+// Global function for timeline toggle (accessible from onclick)
+window.toggleTimeline = function(timelineId) {
+    const content = document.getElementById(timelineId);
+    const summary = document.getElementById(`${timelineId}-summary`);
+    const toggleButton = document.getElementById(`toggle-${timelineId}`);
+    const toggleText = toggleButton?.querySelector('.toggle-text');
+    const toggleIcon = toggleButton?.querySelector('.toggle-icon');
+    
+    if (!content || !summary || !toggleButton) return;
+    
+    const isExpanded = !content.classList.contains('hidden');
+    
+    if (isExpanded) {
+        // Collapse
+        content.classList.add('hidden');
+        summary.classList.remove('hidden');
+        toggleText.textContent = 'Show Details';
+        toggleIcon.style.transform = 'rotate(0deg)';
+    } else {
+        // Expand
+        content.classList.remove('hidden');
+        summary.classList.add('hidden');
+        toggleText.textContent = 'Hide Details';
+        toggleIcon.style.transform = 'rotate(180deg)';
+        
+        // Re-initialize icons for the newly shown content
+        if (typeof UIUtils !== 'undefined') {
+            UIUtils.initializeIcons();
+        }
+    }
+};
+
 // Export for use in other modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = UIComponents;
 } else {
     window.UIComponents = UIComponents;
 }
+

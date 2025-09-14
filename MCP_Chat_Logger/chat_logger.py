@@ -30,6 +30,9 @@ class ChatMessage(BaseModel):
     type: str
     tags: List[str]
     ai_model: str
+    code_changes: Optional[str] = None
+    before_code: Optional[str] = None
+    after_code: Optional[str] = None
     
 # This is the updated model for the final, enriched data
 class ConversationSummary(BaseModel):
@@ -63,9 +66,9 @@ def summarize_conversation_with_gemini(messages: List[Dict[str, Any]]) -> Dict[s
             for msg in messages
         )
 
-        # 2. Improved and focused prompt
+        # 2. Improved and focused prompt for clear, formatted summaries
         prompt = f"""
-You are an expert technical summarizer. Your task is to analyze a programming conversation and generate a concise title and a detailed summary.
+You are an expert technical summarizer. Your task is to analyze a programming conversation and generate a concise title and a well-structured summary.
 
 Analyze the conversation enclosed in the <CONVERSATION> tags.
 
@@ -74,13 +77,19 @@ Analyze the conversation enclosed in the <CONVERSATION> tags.
 </CONVERSATION>
 
 Respond with ONLY a valid JSON object with the following keys:
-- "title": A short, descriptive title for the entire conversation (5-10 words).
-- "summary": A detailed paragraph summarizing the key problems, solutions, and outcomes.
+- "title": A short, descriptive title (5-10 words max)
+- "summary": A clear, structured summary using these formatting rules:
+  * Use **bold** for file paths, function names, and important technical terms
+  * Use **bold** for actions like "modified", "added", "fixed", "updated", "created", "enhanced"
+  * Structure as 2-4 sentences that can be broken into logical paragraphs
+  * Start each major action or change on a conceptually separate thought
+  * Focus on what was actually changed/accomplished
+  * Include specific technical details when relevant
 
 Example Response:
 {{
-  "title": "Debugging a Null Pointer Exception in the User Authentication Module",
-  "summary": "The conversation focused on resolving a persistent null pointer exception that occurred when users tried to log in with invalid credentials. The issue was traced to an uninitialized user profile object. The final solution involved adding a null check before accessing the object's properties, which stabilized the authentication flow."
+  "title": "Enhanced Message Filtering and Summary Formatting",
+  "summary": "**Modified** the frontend message display to show only code-related changes instead of all conversation messages. **Added** intelligent filtering in **`dataManager.js`** to exclude technical noise and focus on meaningful features. **Enhanced** the summary formatting system to support **bold** text and better paragraph structure for improved readability."
 }}
 """
         
@@ -182,11 +191,57 @@ def analyze_individual_message_with_gemini(
     }
 
     # ---------- helpers ----------
-    def _extract_code_blocks(txt: str) -> Optional[str]:
-        """Join any fenced code blocks found in the text."""
+    def _extract_code_blocks(txt: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        """Extract code blocks and try to identify before/after patterns."""
         blocks = re.findall(r"```[a-zA-Z0-9_+\-#.\s]*\n([\s\S]*?)```", txt, re.DOTALL)
         blocks = [b.strip() for b in blocks if b and b.strip()]
-        return "\n\n".join(blocks) if blocks else None
+        
+        if not blocks:
+            return None, None, None
+        
+        # Join all code blocks for the main code_changes field
+        all_code = "\n\n".join(blocks)
+        
+        # Try to identify before/after patterns
+        before_code = None
+        after_code = None
+        
+        # Look for before/after patterns in surrounding text
+        text_lower = txt.lower()
+        
+        # Pattern 1: Look for explicit before/after markers
+        before_pattern = r'(?:before|old|original|current)[\s:]*```[a-zA-Z0-9_+\-#.\s]*\n([\s\S]*?)```'
+        after_pattern = r'(?:after|new|updated|changed|fixed)[\s:]*```[a-zA-Z0-9_+\-#.\s]*\n([\s\S]*?)```'
+        
+        before_matches = re.findall(before_pattern, txt, re.IGNORECASE)
+        after_matches = re.findall(after_pattern, txt, re.IGNORECASE)
+        
+        if before_matches:
+            before_code = before_matches[0].strip()
+        if after_matches:
+            after_code = after_matches[0].strip()
+            
+        # Pattern 2: If we have exactly 2 code blocks and change-related keywords
+        if len(blocks) == 2 and not before_code and not after_code:
+            change_keywords = ['before', 'after', 'change', 'update', 'modify', 'fix', 'replace', 'refactor']
+            if any(word in text_lower for word in change_keywords):
+                before_code = blocks[0]
+                after_code = blocks[1]
+        
+        # Pattern 3: Look for diff-style patterns or edit operations
+        if not before_code and not after_code and len(blocks) >= 1:
+            # Check for tool call patterns that indicate edits
+            if 'search_replace' in text_lower or 'old_string' in text_lower or 'new_string' in text_lower:
+                # Try to extract from search_replace patterns
+                old_match = re.search(r'old_string["\']?\s*[:=]\s*["\']?([\s\S]*?)["\']?(?:\s*,|\s*})', txt, re.IGNORECASE)
+                new_match = re.search(r'new_string["\']?\s*[:=]\s*["\']?([\s\S]*?)["\']?(?:\s*,|\s*})', txt, re.IGNORECASE)
+                
+                if old_match:
+                    before_code = old_match.group(1).strip()
+                if new_match:
+                    after_code = new_match.group(1).strip()
+        
+        return all_code, before_code, after_code
 
     def _parse_json_payload(raw: str) -> Optional[Dict[str, Any]]:
         """Parse JSON from raw text, handling fenced ```json blocks."""
@@ -220,8 +275,13 @@ def analyze_individual_message_with_gemini(
     # ----- If no API key: skip LLM but still do local enrichment -----
     if not api_key:
         msg_type = "unknown"
-        code_changes = _extract_code_blocks(content)
-        return _attach_enrichment(result, content, msg_type, code_changes)
+        code_changes, before_code, after_code = _extract_code_blocks(content)
+        result.update({
+            "code_changes": code_changes,
+            "before_code": before_code,
+            "after_code": after_code
+        })
+        return _attach_enrichment(result, content, msg_type, code_changes, before_code, after_code)
 
     # ----- Configure Gemini -----
     genai.configure(api_key=api_key)
@@ -240,13 +300,17 @@ Analyze the message content enclosed in the <MESSAGE_CONTENT> tags.
 Respond with ONLY a valid JSON object with the following keys:
 - "type": Classify the message type. Must be one of: "code-change", "question", "clarification", "discussion".
 - "tags": A JSON list of 1-3 relevant technical keywords or concepts from the message. If none, return an empty list.
-- "code_changes": If a code block in any programming language is present, extract the raw code as a string.
+- "code_changes": If a code block in any programming language is present, extract all the raw code as a string.
+- "before_code": If there are explicit before/after code patterns or old/new code, extract the before/old code.
+- "after_code": If there are explicit before/after code patterns or old/new code, extract the after/new code.
 
 Example Response:
 {{
   "type": "code-change",
   "tags": ["python", "list comprehension", "refactor"],
-  "code_changes": "before_code = [x for x in range(10)]\\nafter_code = [x*x for x in range(10)]"
+  "code_changes": "before_code = [x for x in range(10)]\\nafter_code = [x*x for x in range(10)]",
+  "before_code": "before_code = [x for x in range(10)]",
+  "after_code": "after_code = [x*x for x in range(10)]"
 }}
 """.strip()
 
@@ -277,14 +341,24 @@ Example Response:
         # Parse or fall back
         if not text:
             msg_type = "parsing-failed"
-            code_changes = _extract_code_blocks(content)
-            return _attach_enrichment(result, content, msg_type, code_changes)
+            code_changes, before_code, after_code = _extract_code_blocks(content)
+            result.update({
+                "code_changes": code_changes,
+                "before_code": before_code,
+                "after_code": after_code
+            })
+            return _attach_enrichment(result, content, msg_type, code_changes, before_code, after_code)
 
         parsed = _parse_json_payload(text)
         if not parsed:
             msg_type = "parsing-failed"
-            code_changes = _extract_code_blocks(content)
-            return _attach_enrichment(result, content, msg_type, code_changes)
+            code_changes, before_code, after_code = _extract_code_blocks(content)
+            result.update({
+                "code_changes": code_changes,
+                "before_code": before_code,
+                "after_code": after_code
+            })
+            return _attach_enrichment(result, content, msg_type, code_changes, before_code, after_code)
 
         # Normalize fields
         msg_type = _normalize_type(parsed.get("type", "discussion"))
@@ -295,30 +369,45 @@ Example Response:
         tags = [str(t) for t in tags[:3] if t is not None]
 
         code_changes = parsed.get("code_changes")
+        before_code = parsed.get("before_code")
+        after_code = parsed.get("after_code")
+        
+        # If no code_changes from LLM, extract from content
         if not isinstance(code_changes, str) or not code_changes.strip():
-            code_changes = _extract_code_blocks(content)
+            extracted_code, extracted_before, extracted_after = _extract_code_blocks(content)
+            code_changes = extracted_code
+            if not before_code:
+                before_code = extracted_before
+            if not after_code:
+                after_code = extracted_after
 
         result.update({
             "type": msg_type,
             "tags": tags,
             "code_changes": code_changes,
+            "before_code": before_code,
+            "after_code": after_code,
             "ai_model": model_name,
         })
-        return _attach_enrichment(result, content, msg_type, code_changes)
+        return _attach_enrichment(result, content, msg_type, code_changes, before_code, after_code)
 
     except Exception as e:
         result.update({
             "type": "error",
             "tags": [],
             "code_changes": f"An exception occurred: {e}",
+            "before_code": None,
+            "after_code": None,
         })
-        return _attach_enrichment(result, content, "error", None)
+        return _attach_enrichment(result, content, "error", None, None, None)
 
 def _attach_enrichment(
     base: Dict[str, Any],
     content: str,
     msg_type: str,
     code_changes: Optional[str],
+    before_code: Optional[str] = None,
+    after_code: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Compute local semantic enrichment using your `process` helpers and
@@ -351,7 +440,9 @@ def _attach_enrichment(
         keywords = []
 
     try:
-        formatted_cc = format_code_changes(None, code_changes) if code_changes else "// No code changes detected"
+        formatted_cc = format_code_changes(before_code, after_code) if (before_code or after_code) else (
+            format_code_changes(None, code_changes) if code_changes else "// No code changes detected"
+        )
     except Exception:
         formatted_cc = "// No code changes detected"
 
@@ -387,6 +478,8 @@ async def save_chat_history(messages: List[Dict[str, Any]], conversation_id: str
             content=msg.get("content"),
             timestamp=msg.get("timestamp"),
             code_changes=msg.get("code_changes"),
+            before_code=msg.get("before_code"),
+            after_code=msg.get("after_code"),
             type=msg.get("type"),
             tags=msg.get("tags"),
             ai_model=msg.get("ai_model")
@@ -410,5 +503,5 @@ async def save_chat_history(messages: List[Dict[str, Any]], conversation_id: str
     return f"Conversation saved and fully processed to: {filename}"
 
 if __name__ == "__main__":
-    # Initialize and run the server
+    print("2+2=4")
     mcp.run(transport='stdio')
