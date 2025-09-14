@@ -1,45 +1,47 @@
 from flask import Flask, jsonify, render_template
 from flask_cors import CORS
 from datetime import datetime, timedelta
+from pathlib import Path
 import json
 import os
-from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
-app.config['CHAT_LOGS_DIR'] = os.path.join(os.path.dirname(__file__), '..', 'MCP_Chat_Logger', 'chat_logs')
+BASE_DIR = Path(__file__).resolve().parents[1]
+CHAT_LOGS_DIR = BASE_DIR / "MCP_Chat_Logger" / "chat_logs"
+app.config["CHAT_LOGS_DIR"] = str(CHAT_LOGS_DIR)
+
 cache = {
     'data': None,
     'expiry': datetime.min
 }
 
-@app.route('/')
+@app.route("/")
 def index():
-    """Home page"""
-    return render_template('index.html')
+    return render_template("index.html")
 
 def process_log_files(log_dir):
     """Reads all log files and processes them into project and summary data."""
-    if not os.path.exists(log_dir):
-        return {'projects': [], 'projectSummaries': []}
+    p = Path(log_dir)
+    if not p.exists() or not p.is_dir():
+        return {"projects": [], "projectSummaries": []}
 
-    files = [f for f in os.listdir(log_dir) if f.endswith('.json')]
-    files.sort(key=lambda x: os.path.getmtime(os.path.join(log_dir, x)), reverse=True)
-    
+    files = sorted(p.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+
     project_summaries = []
-    for file in files:
+    for fpath in files:
         try:
-            with open(os.path.join(log_dir, file), 'r', encoding='utf-8') as f:
+            with fpath.open("r", encoding="utf-8") as f:
                 data = json.load(f)
 
             project_summary = {
-                "id": data.get("id") or data.get("conversation_id") or file,
-                "projectName": data.get("project_name") or "Unknown Project",
-                "title": data.get("title") or "(Untitled)",
-                "summary": data.get("summary") or "",
-                "messages": data.get("messages", []),
-                "messageCount": data.get("message_count") or len(data.get("messages", [])),
+                "id": data.get("id"),
+                "projectName": data.get("project_name"),
+                "title": data.get("title"),
+                "summary": data.get("summary"),
+                "messages": data.get("messages"),
+                "messageCount": data.get("message_count"),
             }
             project_summaries.append(project_summary)
         except Exception as e:
@@ -63,18 +65,15 @@ def process_log_files(log_dir):
         'projectSummaries': project_summaries
     }
     
-@app.route('/api/projects')
+@app.route("/api/projects")
 def get_projects():
-    """API endpoint to get project data."""
-    if datetime.now() < cache['expiry'] and cache['data'] is not None:
-        return jsonify(cache['data'])
-    
-    log_dir = app.config['CHAT_LOGS_DIR']
-    response_data = process_log_files(log_dir)
-    cache['data'] = response_data
-    cache['expiry'] = datetime.now() + timedelta(seconds=60)
-    
-    return jsonify(response_data)
+    if datetime.now() < cache["expiry"] and cache["data"] is not None:
+        return jsonify(cache["data"])
+
+    data = process_log_files(app.config["CHAT_LOGS_DIR"])
+    cache["data"] = data
+    cache["expiry"] = datetime.now() + timedelta(seconds=60)
+    return jsonify(data)
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5002)
+    app.run(host='0.0.0.0', port=5002)

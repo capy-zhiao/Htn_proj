@@ -18,26 +18,26 @@ class DataManager {
             console.log('Starting to load data...');
             const response = await fetch(CONFIG.API.PROJECTS);
             console.log('API response status:', response.status);
-            
+
             if (!response.ok) {
                 throw new Error('Failed to fetch project data');
             }
-            
+
             const rawData = await response.json();
             console.log('Raw data loaded:', rawData);
-            
+
             // Process the project summaries to ensure they have all expected fields
             if (rawData.projectSummaries) {
                 rawData.projectSummaries = rawData.projectSummaries.map((project, index) => {
                     return this.processProjectData(project, index);
                 });
             }
-            
+
             this.allData = rawData;
             console.log('Processed data:', this.allData);
-            
+
             this.filteredProjects = this.allData.projectSummaries || [];
-            
+
             return this.allData;
         } catch (error) {
             console.error('Error loading data:', error);
@@ -49,17 +49,24 @@ class DataManager {
      * Filter projects based on search criteria
      */
     filterProjects(searchQuery = '', projectFilter = 'all', typeFilter = 'all') {
-        const query = searchQuery.toLowerCase();
-        
-        this.filteredProjects = this.allData.projectSummaries.filter(project => {
-            const matchesSearch = !query || 
-                (project.title && project.title.toLowerCase().includes(query)) ||
-                (project.summary && project.summary.toLowerCase().includes(query)) ||
-                (project.projectName && project.projectName.toLowerCase().includes(query)) ||
-                (project.tags && project.tags.some(tag => tag.toLowerCase().includes(query)));
+        const query = (searchQuery ?? '').toLowerCase();
+
+        this.filteredProjects = (this.allData.projectSummaries || []).filter((project) => {
+            const title = (project.title ?? '').toLowerCase();
+            const summary = (project.summary ?? '').toLowerCase();
+            const projectName = (project.projectName ?? '').toLowerCase();
+            const tags = Array.isArray(project.tags) ? project.tags : [];
+            const type = project.type ?? 'Other';
+
+            const matchesSearch =
+                !query ||
+                title.includes(query) ||
+                summary.includes(query) ||
+                projectName.includes(query) ||
+                tags.some((t) => String(t ?? '').toLowerCase().includes(query));
 
             const matchesProject = projectFilter === 'all' || project.projectName === projectFilter;
-            const matchesType = typeFilter === 'all' || project.type === typeFilter;
+            const matchesType = typeFilter === 'all' || type === typeFilter;
 
             return matchesSearch && matchesProject && matchesType;
         });
@@ -110,7 +117,7 @@ class DataManager {
     extractFunctions(data) {
         const functions = [];
         const messages = data.messages || [];
-        
+
         // Patterns to exclude (technical noise)
         const excludePatterns = [
             /function_calls/i,
@@ -126,38 +133,38 @@ class DataManager {
             /^\s*[-•]\s*$/, // Just bullet points
             /^\s*\d+\|\s*/, // Line numbers
         ];
-        
+
         // Keywords that indicate actual features/functionality
         const featureKeywords = [
             'added', 'implemented', 'created', 'built', 'developed',
             'enhanced', 'improved', 'updated', 'modified', 'refactored',
             'feature', 'functionality', 'component', 'module', 'system'
         ];
-        
+
         for (const msg of messages) {
             const content = msg.content || '';
-            
+
             // Skip if message contains too much technical noise
             const noiseCount = excludePatterns.reduce((count, pattern) => {
                 return count + (content.match(pattern) || []).length;
             }, 0);
-            
+
             if (noiseCount > 3) continue; // Skip very technical messages
-            
+
             if (featureKeywords.some(keyword => content.toLowerCase().includes(keyword))) {
                 // Split by sentences and filter
                 const sentences = content.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 10);
-                
+
                 for (const sentence of sentences) {
                     // Check if sentence contains feature keywords and isn't technical noise
-                    const hasFeatureKeyword = featureKeywords.some(keyword => 
+                    const hasFeatureKeyword = featureKeywords.some(keyword =>
                         sentence.toLowerCase().includes(keyword)
                     );
-                    
-                    const isTechnicalNoise = excludePatterns.some(pattern => 
+
+                    const isTechnicalNoise = excludePatterns.some(pattern =>
                         pattern.test && pattern.test(sentence)
                     );
-                    
+
                     if (hasFeatureKeyword && !isTechnicalNoise && sentence.length < 150) {
                         // Clean up the sentence
                         let cleanSentence = sentence
@@ -165,7 +172,7 @@ class DataManager {
                             .replace(/^\d+\.\s*/, '') // Remove numbered lists
                             .replace(/\s+/g, ' ') // Normalize whitespace
                             .trim();
-                        
+
                         if (cleanSentence.length > 15 && !functions.includes(cleanSentence)) {
                             functions.push(cleanSentence);
                         }
@@ -173,7 +180,7 @@ class DataManager {
                 }
             }
         }
-        
+
         return functions.slice(0, CONFIG.UI.MAX_FUNCTIONS_DISPLAY);
     }
 
@@ -184,7 +191,7 @@ class DataManager {
     extractBugFixes(data) {
         const bugFixes = [];
         const messages = data.messages || [];
-        
+
         // Patterns to exclude (technical noise)
         const excludePatterns = [
             /function_calls/i,
@@ -200,37 +207,37 @@ class DataManager {
             /^\s*[-•]\s*$/, // Just bullet points
             /^\s*\d+\|\s*/, // Line numbers
         ];
-        
+
         // Keywords that indicate actual bug fixes
         const bugFixKeywords = [
             'fixed', 'resolved', 'corrected', 'repaired', 'debugged',
             'solved', 'addressed', 'patched', 'bug', 'error', 'issue'
         ];
-        
+
         for (const msg of messages) {
             const content = msg.content || '';
-            
+
             // Skip if message contains too much technical noise
             const noiseCount = excludePatterns.reduce((count, pattern) => {
                 return count + (content.match(pattern) || []).length;
             }, 0);
-            
+
             if (noiseCount > 3) continue; // Skip very technical messages
-            
+
             if (bugFixKeywords.some(keyword => content.toLowerCase().includes(keyword))) {
                 // Split by sentences and filter
                 const sentences = content.split(/[.!?]+/).map(s => s.trim()).filter(s => s.length > 10);
-                
+
                 for (const sentence of sentences) {
                     // Check if sentence contains bug fix keywords and isn't technical noise
-                    const hasBugFixKeyword = bugFixKeywords.some(keyword => 
+                    const hasBugFixKeyword = bugFixKeywords.some(keyword =>
                         sentence.toLowerCase().includes(keyword)
                     );
-                    
-                    const isTechnicalNoise = excludePatterns.some(pattern => 
+
+                    const isTechnicalNoise = excludePatterns.some(pattern =>
                         pattern.test && pattern.test(sentence)
                     );
-                    
+
                     if (hasBugFixKeyword && !isTechnicalNoise && sentence.length < 150) {
                         // Clean up the sentence
                         let cleanSentence = sentence
@@ -238,7 +245,7 @@ class DataManager {
                             .replace(/^\d+\.\s*/, '') // Remove numbered lists
                             .replace(/\s+/g, ' ') // Normalize whitespace
                             .trim();
-                        
+
                         if (cleanSentence.length > 15 && !bugFixes.includes(cleanSentence)) {
                             bugFixes.push(cleanSentence);
                         }
@@ -246,7 +253,7 @@ class DataManager {
                 }
             }
         }
-        
+
         return bugFixes.slice(0, CONFIG.UI.MAX_BUG_FIXES_DISPLAY);
     }
 
@@ -257,12 +264,12 @@ class DataManager {
         const tags = [];
         const tag = data.tag || '';
         const description = data.description || data.summary || '';
-        
+
         // Add tag
         if (tag && tag !== 'other') {
             tags.push(tag.replace(' ', '-'));
         }
-        
+
         // Extract keywords from description
         if (description) {
             const keywords = description.toLowerCase().split(' ');
@@ -272,7 +279,7 @@ class DataManager {
                 }
             }
         }
-        
+
         // Add some default tags based on message types if available
         if (data.messages && Array.isArray(data.messages)) {
             const messageTypes = [...new Set(data.messages.map(m => m.type).filter(Boolean))];
@@ -282,7 +289,7 @@ class DataManager {
                 }
             });
         }
-        
+
         return tags.slice(0, CONFIG.UI.MAX_TAGS_DISPLAY);
     }
 
@@ -293,17 +300,17 @@ class DataManager {
         if (!beforeCode && !afterCode) {
             return '// No code changes detected';
         }
-        
+
         let result = '';
-        
+
         if (beforeCode) {
             result += '// Before:\n' + beforeCode + '\n\n';
         }
-        
+
         if (afterCode) {
             result += '// After:\n' + afterCode;
         }
-        
+
         return result;
     }
 
@@ -322,7 +329,7 @@ class DataManager {
         let before_code = data.before_code;
         let after_code = data.after_code;
         let codeChanges = '';
-        
+
         if (data.messages && Array.isArray(data.messages)) {
             const codeBlocks = [];
             for (const msg of data.messages) {
@@ -340,7 +347,7 @@ class DataManager {
                 codeChanges = codeBlocks.join('\n\n');
             }
         }
-        
+
         return {
             id: data.conversation_id || data.id || `project-${index + 1}`,
             projectName: data.project_name || data.projectName || CONFIG.DEFAULTS.UNKNOWN_PROJECT,

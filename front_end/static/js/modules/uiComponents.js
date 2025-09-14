@@ -19,10 +19,10 @@ class UIComponents {
         const projects = this.dataManager.getAllProjects();
 
         projects.forEach(project => {
-            const projectDiv = UIUtils.createElement('div', 
+            const projectDiv = UIUtils.createElement('div',
                 'flex items-center justify-between p-2 rounded-lg cursor-pointer transition-colors hover:bg-gray-50'
             );
-            
+
             projectDiv.innerHTML = `
                 <div class="flex items-center gap-2">
                     <i data-lucide="folder-open" class="w-4 h-4 text-gray-400"></i>
@@ -56,23 +56,22 @@ class UIComponents {
     renderUpdates() {
         const updatesList = UIUtils.getElementById(CONFIG.ELEMENTS.UPDATES_LIST);
         const updateCount = UIUtils.getElementById(CONFIG.ELEMENTS.UPDATE_COUNT);
-        
+
         if (!updatesList || !updateCount) return;
-        
+
         const filteredProjects = this.dataManager.getFilteredProjects();
         const selectedProject = this.dataManager.getSelectedProject();
-        
+
         updateCount.textContent = filteredProjects.length;
         UIUtils.clearElement(updatesList);
 
         filteredProjects.forEach(project => {
             const updateDiv = UIUtils.createElement('div');
             const isSelected = selectedProject?.id === project.id;
-            
-            updateDiv.className = `p-4 cursor-pointer transition-colors ${
-                isSelected ? CONFIG.CSS_CLASSES.SELECTED_PROJECT : CONFIG.CSS_CLASSES.HOVER_EFFECT
-            }`;
-            
+
+            updateDiv.className = `p-4 cursor-pointer transition-colors ${isSelected ? CONFIG.CSS_CLASSES.SELECTED_PROJECT : CONFIG.CSS_CLASSES.HOVER_EFFECT
+                }`;
+
             updateDiv.innerHTML = `
                 <div class="mb-2">
                     <h3 class="text-sm font-medium text-gray-900 ${CONFIG.CSS_CLASSES.LINE_CLAMP_2}">
@@ -128,7 +127,7 @@ class UIComponents {
     renderDetailView() {
         const selectedProject = this.dataManager.getSelectedProject();
         const detailView = UIUtils.getElementById(CONFIG.ELEMENTS.DETAIL_VIEW);
-        
+
         if (!detailView) return;
 
         if (!selectedProject) {
@@ -315,7 +314,7 @@ class UIComponents {
         if (!projectFilter) return;
 
         projectFilter.innerHTML = '<option value="all">All Projects</option>';
-        
+
         const projects = this.dataManager.getAllProjects();
         projects.forEach(project => {
             const option = document.createElement('option');
@@ -343,11 +342,11 @@ class UIComponents {
         if (!project || !project.messages) {
             return '';
         }
-        
+
         // Filter messages to show ONLY those with code changes
         const allMessages = project.messages || [];
         const codeMessages = allMessages.filter(msg => this.hasCodeContent(msg));
-        
+
         if (codeMessages.length === 0) {
             return `
                 <div class="bg-white border border-gray-200 rounded-xl p-6">
@@ -367,7 +366,7 @@ class UIComponents {
         }
 
         const timelineId = `timeline-${Date.now()}`;
-        
+
         return `
             <div class="bg-white border border-gray-200 rounded-xl p-6">
                 <div class="flex items-center justify-between mb-6">
@@ -424,12 +423,12 @@ class UIComponents {
         if (message.before_code || message.after_code || message.code_changes) {
             return true;
         }
-        
+
         // Check for code blocks in message content
         if (message.content && message.content.includes('```')) {
             return true;
         }
-        
+
         return false;
     }
 
@@ -439,10 +438,10 @@ class UIComponents {
     renderSingleMessage(message, index, isCodeFiltered = false) {
         const messageTime = message.timestamp ? UIUtils.formatTimestamp(message.timestamp) : `Message ${index + 1}`;
         const messageType = message.type || 'message';
-        
+
         // Extract any code from the message
         let codeBlocks = [];
-        
+
         // Check for direct code fields
         if (message.before_code || message.after_code) {
             if (message.before_code && message.after_code) {
@@ -468,7 +467,7 @@ class UIComponents {
                 code: message.code_changes
             });
         }
-        
+
         // Also check for code in message content
         if (message.content && message.content.includes('```')) {
             const contentCodeBlocks = message.content.match(/```[\s\S]*?```/g);
@@ -484,10 +483,10 @@ class UIComponents {
                 });
             }
         }
-        
+
         // Get message type icon and color
         const typeInfo = this.getMessageTypeInfo(messageType);
-        
+
         return `
             <div class="border border-gray-200 rounded-lg bg-white shadow-sm">
                 <!-- Message Header -->
@@ -575,7 +574,7 @@ class UIComponents {
                 textColor: 'text-gray-800'
             }
         };
-        
+
         return typeMap[type] || typeMap['unknown'];
     }
 
@@ -583,77 +582,58 @@ class UIComponents {
      * Render a single code block
      */
     renderCodeBlock(codeBlock, index) {
+        // Map colors to full Tailwind classes (no string-building)
+        const palette = {
+            red: { bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-200', btnBg: 'bg-red-100', btnText: 'text-red-700', hover: 'hover:bg-red-200' },
+            green: { bg: 'bg-green-50', text: 'text-green-700', border: 'border-green-200', btnBg: 'bg-green-100', btnText: 'text-green-700', hover: 'hover:bg-green-200' },
+            blue: { bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', btnBg: 'bg-blue-100', btnText: 'text-blue-700', hover: 'hover:bg-blue-200' },
+            gray: { bg: 'bg-gray-50', text: 'text-gray-700', border: 'border-gray-200', btnBg: 'bg-gray-100', btnText: 'text-gray-700', hover: 'hover:bg-gray-200' },
+        };
+
+        const block = (label, colorKey, icon, code) => {
+            const c = palette[colorKey] || palette.gray;
+            const jsString = JSON.stringify(String(code ?? "")); // safe for JS context
+            return `
+      <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <div class="${c.bg} px-3 py-2 text-sm font-medium ${c.text} ${c.border} flex items-center justify-between">
+          <span class="flex items-center gap-1">
+            <i data-lucide="${icon}" class="w-3 h-3"></i>${label}
+          </span>
+          <button class="text-xs px-2 py-1 ${c.btnBg} ${c.btnText} rounded ${c.hover}"
+                  onclick='UIUtils.copyToClipboard(${jsString})'>
+            Copy
+          </button>
+        </div>
+        <pre class="p-3 text-sm text-gray-800 font-mono leading-relaxed overflow-x-auto max-h-64 overflow-y-auto bg-white"><code>${UIUtils.escapeHtml(code ?? "")}</code></pre>
+      </div>`;
+        };
+
         if (codeBlock.type === 'before-after') {
             return `
-                <div class="border border-gray-200 rounded-lg overflow-hidden">
-                    <div class="bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 border-b border-gray-200">
-                        Before & After Comparison
-                    </div>
-                    <div class="grid md:grid-cols-2 gap-0">
-                        <!-- Before -->
-                        <div class="border-r border-gray-200">
-                            <div class="bg-red-50 px-3 py-2 text-sm font-medium text-red-700 border-b border-red-200 flex items-center justify-between">
-                                <span class="flex items-center gap-1">
-                                    <i data-lucide="minus-circle" class="w-3 h-3"></i>
-                                    Before
-                                </span>
-                                <button 
-                                    class="text-xs px-2 py-1 bg-red-100 text-red-700 rounded hover:bg-red-200"
-                                    onclick="UIUtils.copyToClipboard(\`${codeBlock.before.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)"
-                                >
-                                    Copy
-                                </button>
-                            </div>
-                            <pre class="p-3 text-sm text-gray-800 font-mono leading-relaxed overflow-x-auto max-h-48 overflow-y-auto bg-white"><code>${UIUtils.escapeHtml(codeBlock.before)}</code></pre>
-                        </div>
-                        
-                        <!-- After -->
-                        <div>
-                            <div class="bg-green-50 px-3 py-2 text-sm font-medium text-green-700 border-b border-green-200 flex items-center justify-between">
-                                <span class="flex items-center gap-1">
-                                    <i data-lucide="plus-circle" class="w-3 h-3"></i>
-                                    After
-                                </span>
-                                <button 
-                                    class="text-xs px-2 py-1 bg-green-100 text-green-700 rounded hover:bg-green-200"
-                                    onclick="UIUtils.copyToClipboard(\`${codeBlock.after.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)"
-                                >
-                                    Copy
-                                </button>
-                            </div>
-                            <pre class="p-3 text-sm text-gray-800 font-mono leading-relaxed overflow-x-auto max-h-48 overflow-y-auto bg-white"><code>${UIUtils.escapeHtml(codeBlock.after)}</code></pre>
-                        </div>
-                    </div>
-                </div>
-            `;
-        } else {
-            const typeInfo = {
-                'before': { label: 'Before Code', color: 'red', icon: 'minus-circle' },
-                'after': { label: 'After Code', color: 'green', icon: 'plus-circle' },
-                'code': { label: 'Code Changes', color: 'blue', icon: 'code' },
-                'content': { label: 'Code Block', color: 'gray', icon: 'file-code' }
-            };
-            
-            const info = typeInfo[codeBlock.type] || typeInfo['content'];
-            
-            return `
-                <div class="border border-gray-200 rounded-lg overflow-hidden">
-                    <div class="bg-${info.color === 'gray' ? 'gray' : info.color}-50 px-3 py-2 text-sm font-medium text-${info.color === 'gray' ? 'gray' : info.color}-700 border-b border-${info.color === 'gray' ? 'gray' : info.color}-200 flex items-center justify-between">
-                        <span class="flex items-center gap-1">
-                            <i data-lucide="${info.icon}" class="w-3 h-3"></i>
-                            ${info.label}
-                        </span>
-                        <button 
-                            class="text-xs px-2 py-1 bg-${info.color === 'gray' ? 'gray' : info.color}-100 text-${info.color === 'gray' ? 'gray' : info.color}-700 rounded hover:bg-${info.color === 'gray' ? 'gray' : info.color}-200"
-                            onclick="UIUtils.copyToClipboard(\`${codeBlock.code.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`)"
-                        >
-                            Copy
-                        </button>
-                    </div>
-                    <pre class="p-3 text-sm text-gray-800 font-mono leading-relaxed overflow-x-auto max-h-64 overflow-y-auto bg-white"><code>${UIUtils.escapeHtml(codeBlock.code)}</code></pre>
-                </div>
-            `;
+      <div class="border border-gray-200 rounded-lg overflow-hidden">
+        <div class="bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 border-b border-gray-200">
+          Before & After Comparison
+        </div>
+        <div class="grid md:grid-cols-2 gap-0">
+          <div class="border-r border-gray-200">
+            ${block('Before', 'red', 'minus-circle', codeBlock.before)}
+          </div>
+          <div>
+            ${block('After', 'green', 'plus-circle', codeBlock.after)}
+          </div>
+        </div>
+      </div>`;
         }
+
+        // Single block
+        const meta = {
+            'before': { label: 'Before Code', color: 'red', icon: 'minus-circle' },
+            'after': { label: 'After Code', color: 'green', icon: 'plus-circle' },
+            'code': { label: 'Code Changes', color: 'blue', icon: 'code' },
+            'content': { label: 'Code Block', color: 'gray', icon: 'file-code' },
+        }[codeBlock.type] || { label: 'Code Block', color: 'gray', icon: 'file-code' };
+
+        return block(meta.label, meta.color, meta.icon, codeBlock.code);
     }
 
     /**
@@ -670,17 +650,17 @@ class UIComponents {
 }
 
 // Global function for timeline toggle (accessible from onclick)
-window.toggleTimeline = function(timelineId) {
+window.toggleTimeline = function (timelineId) {
     const content = document.getElementById(timelineId);
     const summary = document.getElementById(`${timelineId}-summary`);
     const toggleButton = document.getElementById(`toggle-${timelineId}`);
     const toggleText = toggleButton?.querySelector('.toggle-text');
     const toggleIcon = toggleButton?.querySelector('.toggle-icon');
-    
+
     if (!content || !summary || !toggleButton) return;
-    
+
     const isExpanded = !content.classList.contains('hidden');
-    
+
     if (isExpanded) {
         // Collapse
         content.classList.add('hidden');
@@ -693,7 +673,7 @@ window.toggleTimeline = function(timelineId) {
         summary.classList.add('hidden');
         toggleText.textContent = 'Hide Details';
         toggleIcon.style.transform = 'rotate(180deg)';
-        
+
         // Re-initialize icons for the newly shown content
         if (typeof UIUtils !== 'undefined') {
             UIUtils.initializeIcons();

@@ -126,7 +126,7 @@ class UIUtils {
         if (text === null || text === undefined) {
             return '';
         }
-        
+
         const str = String(text);
         const map = {
             '&': '&amp;',
@@ -146,17 +146,17 @@ class UIUtils {
         if (text === null || text === undefined) {
             return '';
         }
-        
+
         // First escape HTML to prevent XSS
         let safe = this.escapeHtml(text);
-        
+
         // Then convert **text** to <strong>text</strong>
         // Use a more precise regex to match **text** patterns
         safe = safe.replace(/\*\*([^*]+?)\*\*/g, '<strong class="font-semibold">$1</strong>');
-        
+
         // Convert `code` to inline code blocks
         safe = safe.replace(/`([^`]+?)`/g, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">$1</code>');
-        
+
         return safe;
     }
 
@@ -165,44 +165,25 @@ class UIUtils {
      * Converts long text into readable paragraphs
      */
     static formatSummaryParagraphs(text) {
-        if (text === null || text === undefined) {
-            return '';
-        }
-        
-        // First apply markdown rendering
-        let formatted = this.renderMarkdown(text);
-        
-        // Split into sentences for better paragraph detection
-        const sentences = formatted.split(/(?<=[.!?])\s+/).filter(s => s.trim());
-        
+        if (text == null) return '';
+        const safeMd = this.renderMarkdown(text);        // already escaped + bold/inline-code applied
+        const plain = this.escapeHtml(String(text));    // for sentence splitting (no HTML tags)
+        const sentences = plain.split(/(?<=[.!?])\s+/).filter(s => s.trim());
+
         if (sentences.length <= 2) {
-            // Short summary, keep as single paragraph
-            return `<p class="text-gray-700 leading-relaxed mb-4">${formatted}</p>`;
+            return `<p class="text-gray-700 leading-relaxed mb-4">${safeMd}</p>`;
         }
-        
-        // For longer summaries, create logical paragraph breaks
+
         const paragraphs = [];
-        let currentParagraph = [];
-        
+        let buf = [];
         for (let i = 0; i < sentences.length; i++) {
-            const sentence = sentences[i].trim();
-            currentParagraph.push(sentence);
-            
-            // Create paragraph break after 2-3 sentences or at logical breaks
-            const shouldBreak = 
-                currentParagraph.length >= 3 || // Max 3 sentences per paragraph
-                (currentParagraph.length >= 2 && i < sentences.length - 1) || // 2 sentences if not last
-                sentence.includes('**Modified**') || sentence.includes('**Added**') || 
-                sentence.includes('**Fixed**') || sentence.includes('**Updated**') ||
-                sentence.includes('**Created**') || sentence.includes('**Enhanced**');
-            
-            if (shouldBreak || i === sentences.length - 1) {
-                const paragraphText = currentParagraph.join(' ');
-                paragraphs.push(`<p class="text-gray-700 leading-relaxed mb-4">${paragraphText}</p>`);
-                currentParagraph = [];
+            buf.push(sentences[i].trim());
+            const isBreak = buf.length >= 3 || (buf.length >= 2 && i < sentences.length - 1);
+            if (isBreak || i === sentences.length - 1) {
+                paragraphs.push(`<p class="text-gray-700 leading-relaxed mb-4">${this.renderMarkdown(buf.join(' '))}</p>`);
+                buf = [];
             }
         }
-        
         return paragraphs.join('');
     }
 
@@ -210,11 +191,10 @@ class UIUtils {
      * Truncate text with ellipsis
      */
     static truncateText(text, maxLength) {
-        if (text.length <= maxLength) {
-            return text;
-        }
-        return text.substr(0, maxLength - 3) + '...';
+        const t = (text ?? '').toString();
+        return t.length <= maxLength ? t : t.slice(0, Math.max(0, maxLength - 3)) + '...';
     }
+
 
     /**
      * Check if element is in viewport
@@ -274,10 +254,10 @@ class UIUtils {
             element.style.display = 'block';
             element.style.opacity = '0';
             element.style.transform = 'translateY(-10px)';
-            
+
             // Force reflow
             element.offsetHeight;
-            
+
             element.style.transition = `all ${CONFIG.UI.ANIMATION_DURATION}ms ease-out`;
             element.style.opacity = '1';
             element.style.transform = 'translateY(0)';
@@ -285,7 +265,7 @@ class UIUtils {
             element.style.transition = `all ${CONFIG.UI.ANIMATION_DURATION}ms ease-in`;
             element.style.opacity = '0';
             element.style.transform = 'translateY(-10px)';
-            
+
             setTimeout(() => {
                 element.style.display = 'none';
             }, CONFIG.UI.ANIMATION_DURATION);
