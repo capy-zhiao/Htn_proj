@@ -14,22 +14,20 @@ TAG_TO_TYPE_MAP = {
     'discussion': 'chore',
     'other': 'chore'
 }
+
 SEMANTIC_CONCEPTS = {
     "feature_development": "A developer is creating, implementing, refactoring, or adding a new function/method to the code.",
     "bug_fix": "A developer is fixing, patching, or resolving a bug, error, issue, or problem in the software.",
 }
 
-# ---------- lazy model access (faster cold starts, easier testing) ----------
 @lru_cache(maxsize=1)
-def _get_semantic_model() -> SentenceTransformer:
+def get_semantic_model() -> SentenceTransformer:
     return SentenceTransformer('all-MiniLM-L6-v2')
 
 @lru_cache(maxsize=1)
-def _get_kw_model() -> KeyBERT:
-    # Reuse the same embedding model inside KeyBERT
-    return KeyBERT(model=_get_semantic_model())
+def get_kw_model() -> KeyBERT:
+    return KeyBERT(model=get_semantic_model())
 
-# ---------- your helpers (unchanged) ----------
 def get_type_from_tag(tag: str) -> str:
     return TAG_TO_TYPE_MAP.get(tag, 'Other')
 
@@ -38,7 +36,7 @@ def find_semantic_matches(data: Dict[str, Any], analysis_type: str, top_n: int =
     if not concept_text:
         raise ValueError(f"Analysis type '{analysis_type}' not found in SEMANTIC_CONCEPTS.")
 
-    MODEL = _get_semantic_model()
+    MODEL = get_semantic_model()
     concept_embedding = MODEL.encode([concept_text])
 
     all_sentences: List[str] = []
@@ -46,7 +44,6 @@ def find_semantic_matches(data: Dict[str, Any], analysis_type: str, top_n: int =
         content = msg.get('content', '') or ''
         if not content:
             continue
-        # keep simple; split on sentence enders
         sentences = [s.strip() for s in re.split(r'[.!?]\s+', content) if s.strip()]
         all_sentences.extend(sentences)
 
@@ -67,14 +64,12 @@ def extract_bug_fixes(data: Dict[str, Any], concept: str = "bug_fix") -> List[st
     return raw_sentences
 
 def extract_tags(data: Dict[str, Any], top_n: int = 6) -> List[str]:
-    kw_model = _get_kw_model()
-    primary_tag = data.get('tag', '') or ''
-    description = data.get('description', '') or ''
-    text = f"{primary_tag}. {description}".strip(". ")
-    if not text:
+    kw_model = get_kw_model()
+    primary_tag = data.get('tag', '')
+    if not primary_tag:
         return []
     keywords = kw_model.extract_keywords(
-        text,
+        text=primary_tag,
         keyphrase_ngram_range=(1, 3),
         stop_words='english',
         use_mmr=True,
@@ -93,39 +88,52 @@ def format_code_changes(before_code: Optional[str], after_code: Optional[str]) -
         parts.append(f"// After:\n{after_code}")
     return '\n\n'.join(parts)
 
-def _to_data_for_semantics(messages: List[Dict[str, Any]], tag: str = "", description: str = "") -> Dict[str, Any]:
-    """Adapt your ChatMessage list to the shape expected by the extractors."""
-    return {
-        "messages": [{"content": m.get("content", "")} for m in messages],
-        "tag": tag,
-        "description": description,
+
+# ---- Local enrichment using process.py ----
+def _attach_enrichment(base: Dict[str, Any]) -> Dict[str, Any]:
+    msg_type = base.get("type", "unknown")
+    tag_for_helpers = TAG_TO_TYPE_MAP.get(msg_type, "other")
+    conventional = get_type_from_tag(tag_for_helpers)
+
+    data_for_helpers = {
+        "messages": [{"content": base.get("content", "")}],
+        "tag": tag_for_helpers,
     }
 
-def enrich_conversation_with_semantics(
-    messages: List[Dict[str, Any]],
-    conversation_tag: str,
-    conversation_description: str,
-    before_code: Optional[str] = None,
-    after_code: Optional[str] = None,
-    top_n: int = 3,
-) -> Dict[str, Any]:
-    """
-    Runs all non-LLM semantic enrichments and returns a bundle you can attach
-    to your ConversationSummary or logs.
-    """
-    data = _to_data_for_semantics(messages, conversation_tag, conversation_description)
+    try:
+        feature_sentences = extract_functions(data_for_helpers, concept="feature_development")
+    except Exception:
+        feature_sentences = []
+    try:
+        bugfix_sentences = extract_bug_fixes(data_for_helpers, concept="bug_fix")
+    except Exception:
+        bugfix_sentences = []
+    try:
+        keywords = extract_tags(data_for_helpers, top_n=6)
+    except Exception:
+        keywords = []
 
-    feature_sentences = extract_functions(data, concept="feature_development")
-    bugfix_sentences = extract_bug_fixes(data, concept="bug_fix")
-    keyphrases = extract_tags(data, top_n=6)
+    try:
+        formatted_cc = (
+            format_code_changes(base.get("before_code"), base.get("after_code"))
+            if (base.get("before_code") or base.get("after_code"))
+            else (format_code_changes(None, base.get("code_changes")) if base.get("code_changes") else "// No code changes detected")
+        )
+    except Exception:
+        formatted_cc = "// No code changes detected"
 
-    conv_type = get_type_from_tag(conversation_tag)
-    code_block = format_code_changes(before_code, after_code)
-
-    return {
-        "conventional_type": conv_type,         # e.g., 'feat' | 'fix' | 'chore' | 'security' | 'Other'
-        "feature_sentences": feature_sentences, # top N semantically similar to "feature development"
-        "bugfix_sentences": bugfix_sentences,   # top N semantically similar to "bug fix"
-        "keywords": keyphrases,                 # keyphrases for indexing/search
-        "formatted_code_changes": code_block,   # pretty-printed before/after block (if provided)
+    base["enrichment"] = {
+        "conventional_type": conventional,
+        "feature_sentences": feature_sentences,
+        "bugfix_sentences": bugfix_sentences,
+        "keywords": keywords,
+        "formatted_code_changes": formatted_cc,
     }
+    return base
+
+def normalize_llm_type(v: Any) -> str:
+    t = str(v or "").strip().lower().replace("_", "-")
+    if t in TAG_TO_TYPE_MAP.keys():
+        return t
+    t = TAG_TO_TYPE_MAP.get(t, t)
+    return t if t in TAG_TO_TYPE_MAP else "discussion"

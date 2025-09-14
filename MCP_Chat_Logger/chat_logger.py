@@ -1,42 +1,33 @@
 from typing import List, Dict, Any, Optional, Tuple
 import os
 import json
-import uuid
 import re
+import uuid
 from datetime import datetime
-
-from dotenv import load_dotenv, find_dotenv
-from mcp.server.fastmcp import FastMCP
-import google.generativeai as genai
 from pydantic import BaseModel
-
-# Local helpers (assumed correct per your note)
+from dotenv import load_dotenv
+import google.generativeai as genai
+from mcp.server.fastmcp import FastMCP
 from process import (
     get_type_from_tag,
     extract_functions,
     extract_bug_fixes,
-    extract_tags,
-    format_code_changes,
+    normalize_llm_type,
 )
 
-# ---------------------------------------------------------------------
-# env & server
-# ---------------------------------------------------------------------
-load_dotenv(find_dotenv())
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_THIS_DIR, ".env"))
 mcp = FastMCP("chat_logger")
 
-# ---------------------------------------------------------------------
-# models
-# ---------------------------------------------------------------------
+
 class ChatMessage(BaseModel):
     content: str
     timestamp: str
-    type: str                       # keep LLM type: "code-change" | "question" | "clarification" | "discussion" | ...
+    type: str
     tags: List[str]
     ai_model: str
-    code_changes: Optional[str] = None
-    before_code: Optional[str] = None
-    after_code: Optional[str] = None
+    before_code: str
+    after_code: str
 
 class ConversationSummary(BaseModel):
     id: str
@@ -46,217 +37,287 @@ class ConversationSummary(BaseModel):
     messages: List[ChatMessage]
     message_count: int
 
-# ---------------------------------------------------------------------
-# utils
-# ---------------------------------------------------------------------
 def ensure_logs_directory() -> None:
-    if not os.path.exists("chat_logs"):
-        os.makedirs("chat_logs")
-
-# message-type (LLM) -> helper tag used by process.py
-_TYPE_TO_TAG = {
-    "code-change": "function modify",
-    "question": "question",
-    "clarification": "discussion",
-    "discussion": "discussion",
-    "unknown": "other",
-    "parsing-failed": "other",
-    "error": "other",
-}
-
-_ALLOWED_LLM_TYPES = {"code-change", "question", "clarification", "discussion"}
-
-# ---------------------------------------------------------------------
-# Gemini summarizer (conversation-level)
-# ---------------------------------------------------------------------
-def summarize_conversation_with_gemini(messages: List[Dict[str, Any]]) -> Dict[str, str]:
-    api_key = os.getenv("GEMINI_API_KEY")
+    out_dir = os.path.join(_THIS_DIR, "chat_logs")
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
+        
+def require_gemini() -> str:
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
-        return {"title": "Could not retrieve title", "summary": "Gemini API key not configured"}
+        raise RuntimeError(
+            "GEMINI_API_KEY is missing. Put it in MCP_Chat_Logger/.env or export it in your shell."
+        )
+    genai.configure(api_key=api_key)
+    return api_key
+
+def summarize_conversation_with_gemini(messages: List[Dict[str, Any]]) -> Dict[str, str]:
+    api_key = os.getenv("GEMINI_API_KEY").strip()
+    if not api_key:
+        return {"title": "Analysis Failed", "summary": "GEMINI_API_KEY not configured"}
 
     genai.configure(api_key=api_key)
+    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    model = genai.GenerativeModel(model_name)
+    conversation_text = "\n".join(f"{m.get('content','')}" for m in messages).strip()
+    if not conversation_text:
+        return {"title": "Empty Conversation", "summary": "No content to summarize."}
 
-    # Flatten conversation (content only is OK for a concise summary)
-    conversation_text = "\n".join(f"{msg.get('content', '')}" for msg in messages)
 
     prompt = f"""
-You are an expert technical summarizer. Analyze the programming conversation inside <CONVERSATION> and output JSON.
+        You are an expert technical summarizer. Analyze the programming conversation inside <CONVERSATION> and output JSON.
 
-<CONVERSATION>
-{conversation_text}
-</CONVERSATION>
+        <CONVERSATION>
+        {conversation_text}
+        </CONVERSATION>
 
-Respond with ONLY valid JSON:
-{{
-  "title": "max 8 words capturing the main theme",
-  "summary": "2-4 sentences; use **bold** for actions (modified/added/fixed/updated/created) and for key files/functions; focus on concrete outcomes"
-}}
-""".strip()
+        Respond with ONLY valid JSON:
+        {{
+        "title": "max 8 words capturing the main theme",
+        "summary": "2-4 sentences; use **bold** for actions (modified/added/fixed/updated/created) and for key files/functions; focus on concrete outcomes"
+        }}
+    """.strip()
 
-    try:
-        model = genai.GenerativeModel(os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
-        response = model.generate_content(
-            prompt,
-            generation_config={
-                "temperature": float(os.getenv("GEMINI_TEMPERATURE", "0.3")),
-                "max_output_tokens": int(os.getenv("GEMINI_MAX_TOKENS", "800")),
-            },
-        )
-        text = getattr(response, "text", "") or ""
-        m = re.search(r"\{[\s\S]*\}", text)
-        if m:
-            return json.loads(m.group(0))
+    response = model.generate_content(
+        prompt,
+        generation_config={
+            "temperature": float(os.getenv("GEMINI_TEMPERATURE", "0.3")),
+            "max_output_tokens": int(os.getenv("GEMINI_MAX_TOKENS", "800")),
+        },
+    )
+    text = getattr(response, "text", "")
+    m = parse_json_payload(text)
+    if not m:
         return {"title": "Analysis Failed", "summary": "Could not parse AI response."}
-    except Exception as e:
-        return {"title": "Analysis Error", "summary": f"An exception occurred: {e}"}
+    try:
+        return json.loads(m.group(0))
+    except Exception:
+        return {"title": "Analysis Failed", "summary": "Invalid JSON from model."}
 
-# ---------------------------------------------------------------------
-# Gemini analyzer (message-level)
-# ---------------------------------------------------------------------
+def parse_json_payload(raw: str):
+    import json, re
+    for pattern in [
+        r"```json\s*([\s\S]*?)```",
+        r"```\s*([\s\S]*?)```",
+        r"\{[\s\S]*?\}",
+    ]:
+        m = re.search(pattern, raw, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group(1) if "```" in pattern else m.group(0))
+            except Exception:
+                continue
+    return None
+
+def _parse_json_payload(raw: str) -> Optional[Dict[str, Any]]:
+    # try fenced ```json
+    m = re.search(r"```json\s*([\s\S]*?)```", raw, re.DOTALL | re.IGNORECASE)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            pass
+    # try generic ```
+    m = re.search(r"```\s*([\s\S]*?)```", raw, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1))
+        except Exception:
+            pass
+    # try first (non-greedy) {...}
+    m = re.search(r"\{[\s\S]*?\}", raw)
+    if m:
+        try:
+            return json.loads(m.group(0))
+        except Exception:
+            pass
+    # direct parse last
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
+
+def _extract_code_blocks(txt: str) -> Tuple[str, str]:
+    """
+    Returns (before_code, after_code) as STRINGS (possibly "")
+    so that a non-Optional Pydantic model won't fail.
+    """
+    # collect all fenced code blocks
+    blocks = re.findall(r"```[a-zA-Z0-9_+\-#.\s]*\n([\s\S]*?)```", txt, re.DOTALL)
+    blocks = [b.strip() for b in blocks if b.strip()]
+    all_code = "\n\n".join(blocks) if blocks else ""
+
+    before_code, after_code = "", ""
+
+    # explicit before/after markers near code fences
+    before_matches = re.findall(
+        r"(?:^|\b)(?:before|old|original|current)\s*[:\-]*\s*```[a-zA-Z0-9_+\-#.\s]*\n([\s\S]*?)```",
+        txt, flags=re.IGNORECASE
+    )
+    after_matches = re.findall(
+        r"(?:^|\b)(?:after|new|updated|changed|fixed)\s*[:\-]*\s*```[a-zA-Z0-9_+\-#.\s]*\n([\s\S]*?)```",
+        txt, flags=re.IGNORECASE
+    )
+    if before_matches:
+        before_code = before_matches[0].strip()
+    if after_matches:
+        after_code = after_matches[0].strip()
+
+    # heuristic: exactly two blocks + change-y words -> treat as before/after
+    if len(blocks) == 2 and not before_code and not after_code:
+        if any(k in txt.lower() for k in ["before", "after", "change", "update", "modify", "fix", "replace", "refactor"]):
+            before_code, after_code = blocks[0], blocks[1]
+
+    # search_replace old/new hints
+    if not before_code and not after_code:
+        old_match = re.search(r'old_string["\']?\s*[:=]\s*["\']?([\s\S]*?)["\']?(?:\s*,|\s*})', txt, re.IGNORECASE)
+        new_match = re.search(r'new_string["\']?\s*[:=]\s*["\']?([\s\S]*?)["\']?(?:\s*,|\s*})', txt, re.IGNORECASE)
+        if old_match:
+            before_code = (old_match.group(1) or "").strip()
+        if new_match:
+            after_code = (new_match.group(1) or "").strip()
+
+    # final safety: ensure strings
+    return before_code or "", after_code or ""
+
+# ----------------------------
+# Semantic tags & type (no keywords)
+# ----------------------------
+def _semantic_tags_and_type(content: str) -> Tuple[List[str], str, List[str], List[str]]:
+    """
+    Use local semantic extractors to infer tags and a fallback 'type'.
+    Returns (tags, fallback_type, feature_sentences, bugfix_sentences).
+    """
+    data_for_helpers = {
+        "messages": [{"content": content}],
+        "tag": "other",
+        "description": content[:240],
+    }
+    feature_sentences = []
+    bugfix_sentences = []
+    try:
+        feature_sentences = extract_functions(data_for_helpers, concept="feature_development") or []
+    except Exception:
+        pass
+    try:
+        bugfix_sentences = extract_bug_fixes(data_for_helpers, concept="bug_fix") or []
+    except Exception:
+        pass
+
+    tags: List[str] = []
+    if feature_sentences:
+        tags.append("function modify")  # conservative default
+    if bugfix_sentences:
+        tags.append("bug fixed")
+
+    # add conversational tag if strongly looks like a question/clarification
+    lc = content.strip().lower()
+    if not tags:
+        if lc.endswith("?") or lc.startswith(("how ", "what ", "why ", "can ", "does ", "do ", "is ", "are ")):
+            tags.append("question")
+        else:
+            tags.append("discussion")
+
+    # derive fallback type (LLM may override)
+    if "bug fixed" in tags:
+        fallback_type = "code-change"
+    elif "function modify" in tags:
+        fallback_type = "code-change"
+    elif "question" in tags:
+        fallback_type = "question"
+    else:
+        fallback_type = "discussion"
+
+    return tags, fallback_type, feature_sentences, bugfix_sentences
+
+
 def analyze_individual_message_with_gemini(
     message: Dict[str, Any],
     *,
-    do_enrichment: bool = True,
+    use_llm: bool = True,
+    prefer_semantics: bool = True,
 ) -> Dict[str, Any]:
     """
-    Returns:
+    Semantic-first message analyzer with optional Gemini assist.
+    Always returns:
     {
       "content": str,
       "timestamp": str,
       "type": "code-change" | "question" | "clarification" | "discussion" | "parsing-failed" | "error" | "unknown",
       "tags": List[str],
-      "code_changes": Optional[str],
-      "before_code": Optional[str],
-      "after_code": Optional[str],
+      "before_code": str,
+      "after_code": str,
       "ai_model": str,
-      "enrichment": {...}   # conventional_type, feature_sentences, bugfix_sentences, keywords, formatted_code_changes
+      "enrichment": {
+         "conventional_type": str,
+         "feature_sentences": List[str],
+         "bugfix_sentences": List[str],
+         "keywords": List[str],               # uses semantic tags here (no KeyBERT)
+      }
     }
     """
-    content: str = str(message.get("content", "") or "")
-    ts: str = str(message.get("timestamp", "") or "")
-    api_key = os.getenv("GEMINI_API_KEY")
-    model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    content = str(message.get("content", "") or "")
+    ts = str(message.get("timestamp", "") or "")
 
+    # semantic pass (primary)
+    sem_tags, sem_type, feature_sents, bugfix_sents = _semantic_tags_and_type(content)
+
+    # code extraction from the message text
+    before_code, after_code = _extract_code_blocks(content)
+
+    # base result
     result: Dict[str, Any] = {
         "content": content,
         "timestamp": ts,
-        "type": "unknown",
-        "tags": [],
-        "code_changes": None,
-        "before_code": None,
-        "after_code": None,
-        "ai_model": model_name if api_key else "N/A",
+        "type": sem_type,               # semantic fallback; may be overridden by LLM below
+        "tags": sem_tags[:],            # semantic tags are primary
+        "before_code": before_code,
+        "after_code": after_code,
+        "ai_model": "N/A",
         "enrichment": {
-            "conventional_type": "Other",
-            "feature_sentences": [],
-            "bugfix_sentences": [],
-            "keywords": [],
-            "formatted_code_changes": "// No code changes detected",
+            "conventional_type": get_type_from_tag(sem_tags[0] if sem_tags else "other"),
+            "feature_sentences": feature_sents,
+            "bugfix_sentences": bugfix_sents,
+            "keywords": sem_tags[:],  # keep semantic tags as "keywords"
         },
     }
 
-    def _extract_code_blocks(txt: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-        # Gather all fenced blocks
-        blocks = re.findall(r"```[a-zA-Z0-9_+\-#.\s]*\n([\s\S]*?)```", txt, re.DOTALL)
-        blocks = [b.strip() for b in blocks if b and b.strip()]
-        if not blocks:
-            return None, None, None
+    # optional LLM assist
+    if not use_llm:
+        return result
 
-        all_code = "\n\n".join(blocks)
-        before_code = None
-        after_code = None
-
-        # explicit before/after labels
-        before_matches = re.findall(
-            r"(?:^|\b)(?:before|old|original|current)\s*[:\-]*\s*```[a-zA-Z0-9_+\-#.\s]*\n([\s\S]*?)```",
-            txt,
-            flags=re.IGNORECASE,
-        )
-        after_matches = re.findall(
-            r"(?:^|\b)(?:after|new|updated|changed|fixed)\s*[:\-]*\s*```[a-zA-Z0-9_+\-#.\s]*\n([\s\S]*?)```",
-            txt,
-            flags=re.IGNORECASE,
-        )
-        if before_matches:
-            before_code = before_matches[0].strip()
-        if after_matches:
-            after_code = after_matches[0].strip()
-
-        # exactly-two heuristic + change keywords
-        if len(blocks) == 2 and not before_code and not after_code:
-            if any(k in txt.lower() for k in ["before", "after", "change", "update", "modify", "fix", "replace", "refactor"]):
-                before_code, after_code = blocks[0], blocks[1]
-
-        # tool pattern (search_replace old/new)
-        if not before_code and not after_code:
-            old_match = re.search(r'old_string["\']?\s*[:=]\s*["\']?([\s\S]*?)["\']?(?:\s*,|\s*})', txt, re.IGNORECASE)
-            new_match = re.search(r'new_string["\']?\s*[:=]\s*["\']?([\s\S]*?)["\']?(?:\s*,|\s*})', txt, re.IGNORECASE)
-            if old_match:
-                before_code = old_match.group(1).strip()
-            if new_match:
-                after_code = new_match.group(1).strip()
-
-        return all_code, before_code, after_code
-
-    def _parse_json_payload(raw: str) -> Optional[Dict[str, Any]]:
-        try:
-            return json.loads(raw)
-        except Exception:
-            pass
-        m = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw, re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group(1))
-            except Exception:
-                pass
-        m = re.search(r"\{[\s\S]*?\}", raw)
-        if m:
-            try:
-                return json.loads(m.group(0))
-            except Exception:
-                pass
-        return None
-
-    def _normalize_llm_type(v: Any) -> str:
-        t = str(v or "").strip().lower().replace("_", "-")
-        t = t.replace("code change", "code-change")
-        return t if t in _ALLOWED_LLM_TYPES else "discussion"
-
-    # No API key → still do local code extraction + enrichment
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key:
-        code_changes, before_code, after_code = _extract_code_blocks(content)
-        result.update({"code_changes": code_changes, "before_code": before_code, "after_code": after_code})
-        return _attach_enrichment(result, content, result["type"], code_changes, before_code, after_code)
+        # no key -> keep purely semantic result
+        return result
 
-    # With API key → call Gemini
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel(model_name)
+    try:
+        genai.configure(api_key=api_key)
+        model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        model = genai.GenerativeModel(model_name)
 
-    prompt = f"""
-You are a precise code analysis assistant. Analyze the single message inside <MESSAGE_CONTENT> and output JSON.
+        prompt = f"""
+You are a precise code analysis assistant. Analyze <MESSAGE_CONTENT> and return ONLY JSON with keys:
+- "type": one of "code-change", "question", "clarification", "discussion"
+- "tags": list of 0-3 short technical keywords
+- "before_code": raw code for pre-change state if present
+- "after_code": raw code for post-change state if present
 
 <MESSAGE_CONTENT>
 {content}
 </MESSAGE_CONTENT>
-
-Return ONLY JSON with keys:
-- "type": one of "code-change", "question", "clarification", "discussion"
-- "tags": list of 0-3 short technical keywords
-- "code_changes": raw code (string) if any code blocks exist
-- "before_code": raw code that represents the 'before' state if present
-- "after_code": raw code that represents the 'after' state if present
 """.strip()
 
-    try:
         response = model.generate_content(
             prompt,
             generation_config={"temperature": 0.1, "max_output_tokens": 500},
         )
+
+        # read text robustly
         text = getattr(response, "text", "") or ""
-        if not text:
-            # stitch from candidates if needed
+        if not text and getattr(response, "candidates", None):
             parts: List[str] = []
-            for cand in getattr(response, "candidates", []) or []:
+            for cand in response.candidates or []:
                 cobj = getattr(cand, "content", None) or {}
                 plist = getattr(cobj, "parts", None) or cobj.get("parts", []) or []
                 for p in plist:
@@ -266,115 +327,55 @@ Return ONLY JSON with keys:
             text = "\n".join(parts).strip()
 
         if not text:
-            result["type"] = "parsing-failed"
-            code_changes, before_code, after_code = _extract_code_blocks(content)
-            result.update({"code_changes": code_changes, "before_code": before_code, "after_code": after_code})
-            return _attach_enrichment(result, content, result["type"], code_changes, before_code, after_code)
+            # LLM gave nothing; keep semantic result
+            return result
 
         parsed = _parse_json_payload(text)
         if not parsed:
+            # unparseable; keep semantic result but mark type for visibility
             result["type"] = "parsing-failed"
-            code_changes, before_code, after_code = _extract_code_blocks(content)
-            result.update({"code_changes": code_changes, "before_code": before_code, "after_code": after_code})
-            return _attach_enrichment(result, content, result["type"], code_changes, before_code, after_code)
+            return result
 
-        msg_type = _normalize_llm_type(parsed.get("type", "discussion"))
-        tags = parsed.get("tags", [])
-        if not isinstance(tags, list):
-            tags = []
-        tags = [str(t) for t in tags[:3] if t is not None]
+        # merge LLM outputs
+        llm_type = normalize_llm_type(parsed.get("type", result["type"]))
+        llm_tags = parsed.get("tags", [])
+        if not isinstance(llm_tags, list):
+            llm_tags = []
 
-        code_changes = parsed.get("code_changes")
-        before_code = parsed.get("before_code")
-        after_code = parsed.get("after_code")
+        # prefer semantic tags; optionally union with LLM tags (dedup, length-bounded)
+        if prefer_semantics:
+            merged_tags = list(dict.fromkeys((result["tags"] or []) + [str(t) for t in llm_tags if t]))
+        else:
+            merged_tags = list(dict.fromkeys([str(t) for t in llm_tags if t] + (result["tags"] or [])))
+        merged_tags = merged_tags[:6]  # cap
 
-        # Fallback extraction when LLM omitted code
-        if not isinstance(code_changes, str) or not code_changes.strip() or (before_code is None and after_code is None):
-            ext_all, ext_before, ext_after = _extract_code_blocks(content)
-            if not code_changes:
-                code_changes = ext_all
-            if before_code is None:
-                before_code = ext_before
-            if after_code is None:
-                after_code = ext_after
+        # fill codes if LLM produced something better
+        llm_before = parsed.get("before_code")
+        llm_after = parsed.get("after_code")
+
+        before_code_final = str((llm_before if llm_before is not None else result["before_code"]) or "")
+        after_code_final = str((llm_after if llm_after is not None else result["after_code"]) or "")
 
         result.update({
-            "type": msg_type,
-            "tags": tags,
-            "code_changes": code_changes,
-            "before_code": before_code,
-            "after_code": after_code,
+            "type": llm_type or result["type"],
+            "tags": merged_tags,
+            "before_code": before_code_final,
+            "after_code": after_code_final,
             "ai_model": model_name,
         })
-        return _attach_enrichment(result, content, msg_type, code_changes, before_code, after_code)
+
+        # refresh enrichment formatting if code changed
+        result["enrichment"]["conventional_type"] = get_type_from_tag(
+            merged_tags[0] if merged_tags else "other"
+        )
+        result["enrichment"]["keywords"] = merged_tags[:]
+        return result
 
     except Exception as e:
-        result.update({
-            "type": "error",
-            "tags": [],
-            "code_changes": f"An exception occurred: {e}",
-            "before_code": None,
-            "after_code": None,
-        })
-        return _attach_enrichment(result, content, "error", None, None, None)
+        # keep semantic result, mark type for visibility
+        result["type"] = "error"
+        return result
 
-# ---------------------------------------------------------------------
-# enrichment
-# ---------------------------------------------------------------------
-def _attach_enrichment(
-    base: Dict[str, Any],
-    content: str,
-    msg_type: str,
-    code_changes: Optional[str],
-    before_code: Optional[str],
-    after_code: Optional[str],
-) -> Dict[str, Any]:
-    # choose a helper tag from the LLM-facing type
-    tag_for_helpers = _TYPE_TO_TAG.get(msg_type, "other")
-    conventional = get_type_from_tag(tag_for_helpers)  # -> 'feat' | 'fix' | 'chore' | 'security' | 'Other'
-
-    data_for_helpers = {
-        "messages": [{"content": content}],
-        "tag": tag_for_helpers,
-        "description": content[:280],
-    }
-
-    try:
-        feature_sentences = extract_functions(data_for_helpers, concept="feature_development")
-    except Exception:
-        feature_sentences = []
-
-    try:
-        bugfix_sentences = extract_bug_fixes(data_for_helpers, concept="bug_fix")
-    except Exception:
-        bugfix_sentences = []
-
-    try:
-        keywords = extract_tags(data_for_helpers, top_n=6)
-    except Exception:
-        keywords = []
-
-    try:
-        formatted_cc = (
-            format_code_changes(before_code, after_code)
-            if (before_code or after_code)
-            else (format_code_changes(None, code_changes) if code_changes else "// No code changes detected")
-        )
-    except Exception:
-        formatted_cc = "// No code changes detected"
-
-    base["enrichment"] = {
-        "conventional_type": conventional,
-        "feature_sentences": feature_sentences,
-        "bugfix_sentences": bugfix_sentences,
-        "keywords": keywords,
-        "formatted_code_changes": formatted_cc,
-    }
-    return base
-
-# ---------------------------------------------------------------------
-# MCP tool
-# ---------------------------------------------------------------------
 @mcp.tool()
 async def save_chat_history(
     messages: List[Dict[str, Any]],
@@ -382,38 +383,31 @@ async def save_chat_history(
     project_name: str = "MCP_Chat_Logger",
     use_ai_analysis: bool = True,
 ) -> str:
-    """
-    Save chat history with AI analysis (summary + per-message classification).
-    """
     ensure_logs_directory()
+    require_gemini()  # hard fail fast
 
     if not conversation_id:
         conversation_id = str(uuid.uuid4())
 
-    ai_analysis = summarize_conversation_with_gemini(messages) if use_ai_analysis else {"title": "Chat Conversation", "summary": ""}
+    # summarize conversation
+    ai_analysis = summarize_conversation_with_gemini(messages)
+    title = ai_analysis.get("title")
+    summary = ai_analysis.get("summary")
 
-    title = ai_analysis.get("title") or "Chat Conversation"
-    summary = ai_analysis.get("summary") or ""
-
-    # classify each message
     classified: List[ChatMessage] = []
     for raw in messages:
         analyzed = analyze_individual_message_with_gemini(raw)
-
-        # Build ChatMessage (strict shape)
-        cm = ChatMessage(
+        classified.append(ChatMessage(
             content=analyzed.get("content", ""),
             timestamp=analyzed.get("timestamp", ""),
             type=analyzed.get("type", "unknown"),
             tags=analyzed.get("tags", []) or [],
             ai_model=analyzed.get("ai_model", "N/A"),
-            code_changes=analyzed.get("code_changes"),
             before_code=analyzed.get("before_code"),
             after_code=analyzed.get("after_code"),
-        )
-        classified.append(cm)
+        ))
 
-    conversation = ConversationSummary(
+    convo = ConversationSummary(
         id=conversation_id,
         project_name=project_name,
         title=title,
@@ -422,14 +416,15 @@ async def save_chat_history(
         message_count=len(classified),
     )
 
-    filename = f"chat_logs/conversation_{conversation_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(conversation.model_dump_json(indent=2))
+    # Save (include both 'id' and 'conversation_id' for frontend compatibility)
+    payload = convo.model_dump()
+    payload["conversation_id"] = payload["id"]
+    out_path = os.path.join(_THIS_DIR, "chat_logs", f"conversation_{conversation_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
 
-    return f"Conversation saved and fully processed to: {filename}"
+    return f"Conversation saved and fully processed to: {out_path}"
 
-# ---------------------------------------------------------------------
-# server entry
-# ---------------------------------------------------------------------
+# ---- Entry ----
 if __name__ == "__main__":
     mcp.run(transport="stdio")
