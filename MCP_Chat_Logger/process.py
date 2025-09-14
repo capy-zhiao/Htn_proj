@@ -1,8 +1,6 @@
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
 import re
-
-# ---------- your existing imports / constants ----------
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from keybert import KeyBERT
