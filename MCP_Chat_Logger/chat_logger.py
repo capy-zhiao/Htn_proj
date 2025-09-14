@@ -54,6 +54,7 @@ def summarize_conversation_with_gemini(messages: List[Dict[str, Any]]) -> Dict[s
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
+        print("❌ GEMINI_API_KEY not found in environment variables")
         return {"title": "Chat Conversation", "summary": "Gemini API key not configured"}
     
     genai.configure(api_key=api_key)
@@ -107,9 +108,11 @@ Example Response:
         if json_match:
             return json.loads(json_match.group())
         else:
+            print(f"⚠️ Warning: Could not parse JSON from Gemini response. Response was:\n{response.text}")
             return {"title": "Analysis Failed", "summary": "Could not parse AI response."}
             
     except Exception as e:
+        print(f"Error during Gemini analysis: {e}")
         return {"title": "Analysis Error", "summary": f"An exception occurred: {e}"}
 
 
@@ -500,4 +503,5 @@ async def save_chat_history(messages: List[Dict[str, Any]], conversation_id: str
     return f"Conversation saved and fully processed to: {filename}"
 
 if __name__ == "__main__":
+    print("2+2=4")
     mcp.run(transport='stdio')
