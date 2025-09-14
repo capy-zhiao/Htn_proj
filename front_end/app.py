@@ -43,7 +43,6 @@ def process_log_files(log_dir):
             }
             project_summaries.append(project_summary)
         except Exception as e:
-            print(f'Error reading file {file}: {e}')
             continue
         
     # Aggregate projects
